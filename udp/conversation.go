@@ -11,44 +11,32 @@ import (
 // Structure container, connection free and instead dependent on the conversation's ID
 type conversation struct {
 	// Conversation ID
-	conversation_id string
+	conversation_id uint32
 
 	// Buffer for incoming packets
-	incoming map[int]Packet
+	incoming map[uint32]Pckt
 
 	// Mutex for the buffer with incoming packets
 	incoming_lock sync.Mutex
 
 	// Mutex for the receivedPackets map
 	received_lock      sync.Mutex
-	receivedPackets    map[int]bool
+	receivedPackets    map[uint32]bool
 	highestSeqReceived int
 }
 
 // Conversation Constructor
-func newConversation(conversation_id string) *conversation {
+func newConversation(conversation_id uint32) *conversation {
 	return &conversation{
 		conversation_id:    conversation_id,
-		incoming:           make(map[int]Packet),
-		receivedPackets:    make(map[int]bool),
+		incoming:           make(map[uint32]Pckt),
+		receivedPackets:    make(map[uint32]bool),
 		highestSeqReceived: 0,
 	}
 }
 
-// Receive Method
-func (conv *conversation) Receive(packet Packet) {
-	// Mutex lock the incoming packets buffer
-	//conv.incoming_lock.Lock()
-
-	// Append packet to incoming buffer
-	//conv.incoming = append(conv.incoming, packet)
-
-	// Unlock Mutex lock
-	//conv.incoming_lock.Unlock()
-}
-
 // Handle Conversation
-func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, data Packet) {
+func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, data Pckt) {
 	fmt.Printf("Received packet: ConversationId=%s, SequenceNumber=%d, Data=%s, IsFinal=%t\n", data.ConversationId, data.SequenceNumber, data.Data, data.IsFinal)
 
 	// Lock Received Map

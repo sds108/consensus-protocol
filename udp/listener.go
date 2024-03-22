@@ -30,11 +30,11 @@ func listener() {
 	log.Printf("UDP server listening on port %s", udpPort)
 
 	// Initialize a list of current conversations
-	conversations := make(map[string]*conversation)
+	conversations := make(map[uint32]*conversation)
 
 	// Listen Continuously
 	for {
-		buffer := make([]byte, 1024)
+		buffer := make([]byte, 4096)
 		n, addr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			log.Println("Error reading from UDP:", err)
@@ -45,8 +45,14 @@ func listener() {
 	}
 }
 
-func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, data []byte, conversations *map[string]*conversation) {
-	packet, err := deserializePacket(data)
+func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, data []byte, conversations *map[uint32]*conversation) {
+	// Make sure Data is over 20 Bytes
+	if len(data) < 20 {
+		log.Printf("Packet size below 20 Bytes???\n")
+		return
+	}
+
+	pcktheader, err := DeserializeHeader(data)
 	if err != nil {
 		log.Printf("Error deserializing packet: %v", err)
 		return
@@ -54,18 +60,21 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, data []byte, co
 
 	//fmt.Printf("Received packet: ConversationId=%s, SequenceNumber=%d, Data=%s, IsFinal=%t\n", packet.ConversationId, packet.SequenceNumber, packet.Data, packet.IsFinal)
 
+	// Create Packet
+	pckt := Pckt{*pcktheader, data[20:]}
+
 	// Find Corresponding Conversation
-	conversation_reference, exists := (*conversations)[packet.ConversationId]
+	conversation_reference, exists := (*conversations)[pcktheader.ConvID]
 
 	// If it exists, send the packet to the corresponding conversation
 	if exists {
-		conversation_reference.ARQ_Receive(conn, addr, packet)
+		conversation_reference.ARQ_Receive(conn, addr, pckt)
 	} else {
 		// Else create a new conversation
-		(*conversations)[packet.ConversationId] = newConversation(packet.ConversationId)
+		(*conversations)[pcktheader.ConvID] = newConversation(pcktheader.ConvID)
 
 		// and now send it there
-		(*conversations)[packet.ConversationId].ARQ_Receive(conn, addr, packet)
+		(*conversations)[pcktheader.ConvID].ARQ_Receive(conn, addr, pckt)
 	}
 
 	// Print size of conversations list
