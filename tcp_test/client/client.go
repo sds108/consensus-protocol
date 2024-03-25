@@ -9,8 +9,8 @@ import (
 )
 
 func main() { // Defines the main functtion, which is the entry point of the program.
-	conn, err := net.Dial("tcp", "localhost:8080") // Establishes a TCP connection to localhost on port 8080 and returns a connection object and any error encountered
-	if err != nil {                                // Checks if there was an error while dialing
+	conn, err := net.Dial("tcp", "172.22.0.2:8080") // Establishes a TCP connection to localhost on port 8080 and returns a connection object and any error encountered
+	if err != nil {                                 // Checks if there was an error while dialing
 		fmt.Println("Error connecting:", err) // Prints an error message if an error occurred
 		return                                // Exits the function
 	}

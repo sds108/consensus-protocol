@@ -11,9 +11,7 @@ import (
 	"net"
 )
 
-var udpPort = "8080"
-
-func listener() {
+func listener(udpPort string) {
 	// Resolve UDP Address to listen at
 	addr, err := net.ResolveUDPAddr("udp", ":"+udpPort)
 	if err != nil {
@@ -29,9 +27,6 @@ func listener() {
 	defer conn.Close()
 	log.Printf("UDP server listening on port %s", udpPort)
 
-	// Initialize a list of current conversations
-	conversations := make(map[uint32]*conversation)
-
 	// Listen Continuously
 	for {
 		buffer := make([]byte, 4096)
@@ -41,46 +36,58 @@ func listener() {
 			continue
 		}
 
-		go handleIncomingPackets(conn, addr, buffer[:n], &conversations)
+		go handleIncomingPackets(conn, addr, buffer[:n])
 	}
 }
 
-func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, data []byte, conversations *map[uint32]*conversation) {
-	// Make sure Data is over 20 Bytes
-	if len(data) < 20 {
-		log.Printf("Packet size below 20 Bytes???\n")
+func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []byte) {
+	// Make sure Data is at least 20 Bytes
+	if len(raw_packet) < 20 {
+		log.Printf("handleIncomingPackets: insufficient packet size\n")
 		return
 	}
 
-	pcktheader, err := DeserializeHeader(data)
+	// Magic and Checksum check, if this fails, you would drop the packet
+	verify_packet, err := VerifyPacket(raw_packet)
 	if err != nil {
-		log.Printf("Error deserializing packet: %v", err)
+		log.Printf("handleIncomingPackets: VerifyPacket returned Error\n")
+		return
+	}
+
+	if !verify_packet {
+		log.Printf("handleIncomingPackets: VerifyPacket returned False\n")
+		return
+	}
+
+	// Deserialize the Header
+	pcktheader, err := DeserializeHeader(raw_packet)
+	if err != nil {
+		log.Printf("handleIncomingPackets: DeserializeHeader returned Error\n")
 		return
 	}
 
 	//fmt.Printf("Received packet: ConversationId=%s, SequenceNumber=%d, Data=%s, IsFinal=%t\n", packet.ConversationId, packet.SequenceNumber, packet.Data, packet.IsFinal)
 
 	// Create Packet
-	pckt := Pckt{*pcktheader, data[20:]}
+	pckt := Pckt{*pcktheader, raw_packet[20:]}
 
 	// Find Corresponding Conversation
-	conversation_reference, exists := (*conversations)[pcktheader.ConvID]
+	conversation_reference, exists := (conversations_map)[pcktheader.ConvID]
 
 	// If it exists, send the packet to the corresponding conversation
 	if exists {
 		conversation_reference.ARQ_Receive(conn, addr, pckt)
 	} else {
 		// Else create a new conversation
-		(*conversations)[pcktheader.ConvID] = newConversation(pcktheader.ConvID)
+		conversations_map_lock.Lock()
+		conversations_map[pcktheader.ConvID] = newConversation(pcktheader.ConvID)
+		conversations_map_lock.Unlock()
 
 		// and now send it there
-		(*conversations)[pcktheader.ConvID].ARQ_Receive(conn, addr, pckt)
+		conversations_map[pcktheader.ConvID].ARQ_Receive(conn, addr, pckt)
+
 	}
 
 	// Print size of conversations list
-	fmt.Printf("Conversations: %d\n", len(*conversations))
-}
-
-func main() {
-	listener()
+	fmt.Printf("Conversations: %d\n", len(conversations_map))
 }
