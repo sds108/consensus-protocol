@@ -1,6 +1,5 @@
-// Packet handling for packet serialisation and deserialisation
-
-// Version 1.3
+// packet.go
+// Defines the packet structure and provides functions for packet serialization and deserialization
 package main
 
 import (
@@ -19,7 +18,7 @@ type PcktHeader struct {
 	Checksum    uint32 // 4 bytes CRC32 IEEE
 	ConvID      uint32 // 4 bytes
 	SequenceNum uint32 // 4 bytes
-	Final       uint16 // 2 bytes
+	IsFinal     uint16 // 2 bytes
 	Type        uint16 // 2 bytes
 }
 
@@ -27,116 +26,89 @@ type PcktHeader struct {
 const (
 	Data = uint16(0)
 	ACK  = uint16(1)
-	NACK = uint16(2)
+	NAK  = uint16(2)
 )
 
 type Pckt struct {
-	Header PcktHeader // 20 bytes
-	Body   []byte     // N bytes
+	Header         PcktHeader // 20 bytes
+	Body           []byte     // N bytes
+	MissingPackets []uint32
 
 	// 20 + N <= 256 Bytes
 }
 
-// Deserialise Header
-func DeserializeHeader(raw_header []byte) (*PcktHeader, error) {
-	// New Packet Header
-
-	// Temporary variables
-	var MAGIC uint32
-	var CHECKSUM uint32
-	var CONVID uint32
-	var SEQUENCENUM uint32
-	var FINAL uint16
-	var TYPE uint16
-
-	err := binary.Read(bytes.NewReader(raw_header[0:4]), binary.BigEndian, &MAGIC)
+// SerializePacket serializes the entire packet including its header and body.
+func SerializePacket(packet Pckt) ([]byte, error) {
+	headerBytes, err := SerializeHeader(packet.Header)
 	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("DeserializeHeader: Error decoding the Magic Field")
+		return nil, err
 	}
-
-	err = binary.Read(bytes.NewReader(raw_header[4:8]), binary.BigEndian, &CHECKSUM)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("DeserializeHeader: Error decoding the Checksum Field")
-	}
-
-	err = binary.Read(bytes.NewReader(raw_header[8:12]), binary.BigEndian, &CONVID)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("DeserializeHeader: Error decoding the ConvID Field")
-	}
-
-	err = binary.Read(bytes.NewReader(raw_header[12:16]), binary.BigEndian, &SEQUENCENUM)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("DeserializeHeader: Error decoding the SequenceNum Field")
-	}
-
-	err = binary.Read(bytes.NewReader(raw_header[16:18]), binary.BigEndian, &FINAL)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("DeserializeHeader: Error decoding the Final Field")
-	}
-
-	err = binary.Read(bytes.NewReader(raw_header[18:20]), binary.BigEndian, &TYPE)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("DeserializeHeader: Error decoding the Type Field")
-	}
-
-	return &PcktHeader{
-		Magic:       MAGIC,
-		Checksum:    CHECKSUM,
-		ConvID:      CONVID,
-		SequenceNum: SEQUENCENUM,
-		Final:       FINAL,
-		Type:        TYPE,
-	}, nil
+	return append(headerBytes, packet.Body...), nil
 }
 
-// Serialize Header
-func SerializeHeader(pcktheader PcktHeader) ([]byte, error) {
+// DeserializePacket deserializes the entire packet from bytes.
+func DeserializePacket(data []byte) (*Pckt, error) {
+	if len(data) < 20 { // Assuming header is 20 bytes
+		return nil, errors.New("packet too short")
+	}
+	header, err := DeserializeHeader(data[:20])
+	if err != nil {
+		return nil, err
+	}
+	return &Pckt{Header: *header, Body: data[20:]}, nil
+}
 
+// SerializeHeader serializes the packet header into bytes.
+func SerializeHeader(pcktheader PcktHeader) ([]byte, error) {
 	buf := new(bytes.Buffer)
 
-	err := binary.Write(buf, binary.BigEndian, pcktheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("SerializeHeader: Error encoding the Magic Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktheader.Magic); err != nil {
+		return nil, err
 	}
-
-	err = binary.Write(buf, binary.BigEndian, pcktheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("SerializeHeader: Error encoding the Checksum Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktheader.Checksum); err != nil {
+		return nil, err
 	}
-
-	err = binary.Write(buf, binary.BigEndian, pcktheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("SerializeHeader: Error encoding the ConvID Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktheader.ConvID); err != nil {
+		return nil, err
 	}
-
-	err = binary.Write(buf, binary.BigEndian, pcktheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("SerializeHeader: Error encoding the SequenceNum Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktheader.SequenceNum); err != nil {
+		return nil, err
 	}
-
-	err = binary.Write(buf, binary.BigEndian, pcktheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("SerializeHeader: Error extracting the Final Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktheader.IsFinal); err != nil {
+		return nil, err
 	}
-
-	err = binary.Write(buf, binary.BigEndian, pcktheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("SerializeHeader: Error extracting the Type Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktheader.Type); err != nil {
+		return nil, err
 	}
 
 	return buf.Bytes(), nil
+}
+
+// DeserializeHeader deserializes the packet header from bytes.
+func DeserializeHeader(data []byte) (*PcktHeader, error) {
+	var header PcktHeader
+	buf := bytes.NewReader(data)
+
+	if err := binary.Read(buf, binary.BigEndian, &header.Magic); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.Checksum); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.ConvID); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.SequenceNum); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.IsFinal); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.Type); err != nil {
+		return nil, err
+	}
+
+	return &header, nil
 }
 
 // Returns true or false based on if byte slice a == b

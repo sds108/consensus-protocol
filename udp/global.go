@@ -18,6 +18,9 @@ func MAGIC_BYTES_CONST() []byte {
 const SERVER_PORT_CONST = "8080"
 const CLIENT_PORT_CONST = "42069"
 
+// Own Conversation ID /////////////////////////////////
+var conversation_id_self = uint32(0)
+
 // Global Objects
-var conversations_map_lock sync.Mutex
-var conversations_map map[uint32]*conversation
+var conversations_lock sync.Mutex
+var conversations map[uint32]*conversation

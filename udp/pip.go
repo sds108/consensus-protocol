@@ -77,10 +77,6 @@ type PcktVoteResultBroadcast PcktVoteResponse
 
 // Deserialise Data Header
 func DeserializeDataHeader(raw_header []byte) (*DataHeader, error) {
-	// New Data Header
-	var MAGIC uint32
-	var CHECKSUM uint32
-	var DATAID uint16
 
 	err := binary.Read(bytes.NewReader(raw_header[0:4]), binary.BigEndian, &MAGIC)
 	if err != nil {
@@ -112,22 +108,16 @@ func SerializeDataHeader(dataheader DataHeader) ([]byte, error) {
 
 	buf := new(bytes.Buffer)
 
-	err := binary.Write(buf, binary.BigEndian, dataheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Data Magic Field")
+	if err := binary.Write(buf, binary.BigEndian, dataheader.Magic); err != nil {
+		return nil, err
 	}
 
-	err = binary.Write(buf, binary.BigEndian, dataheader.Magic)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Data Checksum Field")
+	if err := binary.Write(buf, binary.BigEndian, dataheader.Checksum); err != nil {
+		return nil, err
 	}
 
-	err = binary.Write(buf, binary.BigEndian, dataheader.DataID)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the DataID Field")
+	if err := binary.Write(buf, binary.BigEndian, dataheader.DataID); err != nil {
+		return nil, err
 	}
 
 	return buf.Bytes(), nil
@@ -198,18 +188,12 @@ func SerializeHello(pckthello PcktHello) ([]byte, error) {
 		return nil, errors.New("Something wrong appending the Data Header to the Hello Packet serialization buffer")
 	}
 
-	// Store Version Attribute to buf
-	err = binary.Write(buf, binary.BigEndian, pckthello.Version)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Hello Packet Version Field")
+	if err := binary.Write(buf, binary.BigEndian, pckthello.Version); err != nil {
+		return nil, err
 	}
 
-	// Store NumFeatures to buf
-	err = binary.Write(buf, binary.BigEndian, pckthello.NumFeatures)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Hello Packet Num Features Field")
+	if err := binary.Write(buf, binary.BigEndian, pckthello.NumFeatures); err != nil {
+		return nil, err
 	}
 
 	// Store all Features to buf
@@ -226,35 +210,35 @@ func SerializeHello(pckthello PcktHello) ([]byte, error) {
 
 // Deserialize Vote Request or Broadcast Packet
 func DeserializeVoteRequest(DATAHEADER DataHeader, raw_data []byte) (*PcktVoteRequest, error) {
-	// New Vote Request Packet
-	var VOTEID uuid.UUID
-	var QUESTIONLENGTH uint32
-	var QUESTION string
-
-	err := binary.Read(bytes.NewReader(raw_data[0:16]), binary.BigEndian, &VOTEID)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong extracting the Vote Request VoteID Field")
+	if len(raw_data) < 10 { // Assuming header is 10 bytes
+		return nil, errors.New("packet too short")
 	}
 
-	err = binary.Read(bytes.NewReader(raw_data[16:20]), binary.BigEndian, &QUESTIONLENGTH)
+	dataheader, err := DeserializeDataHeader(raw_data[:10])
 	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong extracting the Vote Request Question Length Field")
+		return nil, err
 	}
 
-	err = binary.Read(bytes.NewReader(raw_data[20:(20+QUESTIONLENGTH)]), binary.BigEndian, &QUESTION)
+	var pcktvoterequest PcktVoteRequest
+	pcktvoterequest.Header = *dataheader
+
+	buf := bytes.NewReader(raw_data[10:])
+
+	if err := binary.Read(buf, binary.BigEndian, &pcktvoterequest.VoteID); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Read(buf, binary.BigEndian, &pcktvoterequest.QuestionLength); err != nil {
+		return nil, err
+	}
+
+	err = binary.Read(bytes.NewReader(raw_data[10:(10+pcktvoterequest.QuestionLength)]), binary.BigEndian, pcktvoterequest.Question)
 	if err != nil {
 		fmt.Println(err)
 		return nil, errors.New("Something wrong extracting the Vote Request Question Field")
 	}
 
-	return &PcktVoteRequest{
-		Header:         DATAHEADER,
-		VoteID:         VOTEID,
-		QuestionLength: QUESTIONLENGTH,
-		Question:       QUESTION,
-	}, nil
+	return &pcktvoterequest, nil
 }
 
 // Serialize Vote Request or Broadcast Packet
@@ -276,53 +260,46 @@ func SerializeVoteRequest(pcktvoterequest PcktVoteRequest) ([]byte, error) {
 		return nil, errors.New("Something wrong appending the Data Header to the Vote Request Begin Packet serialization buffer")
 	}
 
-	// Store VoteID Attribute to buf
-	err = binary.Write(buf, binary.BigEndian, pcktvoterequest.VoteID)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Vote Request Begin Packet VoteID Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktvoterequest.VoteID); err != nil {
+		return nil, err
 	}
 
-	// Store Question Length to buf
-	err = binary.Write(buf, binary.BigEndian, pcktvoterequest.QuestionLength)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Vote Request Packet Question Length Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktvoterequest.QuestionLength); err != nil {
+		return nil, err
 	}
 
-	// Store Question to buf
-	err = binary.Write(buf, binary.BigEndian, pcktvoterequest.Question)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Vote Request Packet Question Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktvoterequest.Question); err != nil {
+		return nil, err
 	}
 
 	return buf.Bytes(), nil
 }
 
 // Deserialize Vote Response or Broadcast Result Packet
-func DeserializeVoteResponse(DATAHEADER DataHeader, raw_data []byte) (*PcktVoteResponse, error) {
-	// New Vote Response Packet
-	var VOTEID uuid.UUID
-	var RESPONSE uint16
-
-	err := binary.Read(bytes.NewReader(raw_data[0:16]), binary.BigEndian, &VOTEID)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong extracting the VoteID Field")
+func DeserializeVoteResponse(raw_data []byte) (*PcktVoteResponse, error) {
+	if len(raw_data) < 10 { // Assuming header is 10 bytes
+		return nil, errors.New("packet too short")
 	}
 
-	err = binary.Read(bytes.NewReader(raw_data[16:20]), binary.BigEndian, &RESPONSE)
+	dataheader, err := DeserializeDataHeader(raw_data[:10])
 	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong extracting the Response Field")
+		return nil, err
 	}
 
-	return &PcktVoteResponse{
-		Header:   DATAHEADER,
-		VoteID:   VOTEID,
-		Response: RESPONSE,
-	}, nil
+	var pcktvoteresponse PcktVoteResponse
+	pcktvoteresponse.Header = *dataheader
+
+	buf := bytes.NewReader(raw_data[10:])
+
+	if err := binary.Read(buf, binary.BigEndian, &pcktvoteresponse.VoteID); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Read(buf, binary.BigEndian, &pcktvoteresponse.Response); err != nil {
+		return nil, err
+	}
+
+	return &pcktvoteresponse, nil
 }
 
 // Serialize Vote Response or Broadcast Result Packet
@@ -344,18 +321,12 @@ func SerializeVoteResponse(pcktvoteresponse PcktVoteResponse) ([]byte, error) {
 		return nil, errors.New("Something wrong appending the Data Header to the Vote Response Packet serialization buffer")
 	}
 
-	// Store VoteID Attribute to buf
-	err = binary.Write(buf, binary.BigEndian, pcktvoteresponse.VoteID)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Vote Response Packet VoitID Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktvoteresponse.VoteID); err != nil {
+		return nil, err
 	}
 
-	// Store Vote Response to buf
-	err = binary.Write(buf, binary.BigEndian, pcktvoteresponse.Response)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Something wrong encoding the Vote Response Packet Response Field")
+	if err := binary.Write(buf, binary.BigEndian, pcktvoteresponse.Response); err != nil {
+		return nil, err
 	}
 
 	return buf.Bytes(), nil

@@ -1,6 +1,6 @@
 # Consensus Protocol
 
-Slowly migrating to Raw Bytes Protocol. Ken is working on Selective Repeat with Timers and Timeouts, current version is lacking in said features. 
+Slowly migrating to Raw Bytes Protocol. Ken is working on Selective Repeat with Timers and Timeouts. Leo will be working on getting actions working.
 
 #### New Features:
 -------------------

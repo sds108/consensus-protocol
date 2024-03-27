@@ -10,9 +10,9 @@ func main() {
 	// Generate a Conversation ID if necessary
 
 	// Make Conversations List, with Mutex Lock
-	conversations_map_lock.Lock()
-	conversations_map = make(map[uint32]*conversation)
-	conversations_map_lock.Unlock()
+	conversations_lock.Lock()
+	conversations = make(map[uint32]*conversation)
+	conversations_lock.Unlock()
 
 	// Start Listener Thread
 	go listener(SERVER_PORT_CONST)

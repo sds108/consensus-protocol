@@ -1,12 +1,7 @@
-// Focuses on the server side logic.
-// Includes listening for incoming packets and handlin them.
-
-// Version 1.3
-
 package main
 
 import (
-	"fmt"
+	//"fmt"
 	"log"
 	"net"
 )
@@ -18,12 +13,10 @@ func listener(udpPort string) {
 		log.Fatal(err)
 	}
 
-	// Start Connection Socket on the UDP Address
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	defer conn.Close()
 	log.Printf("UDP server listening on port %s", udpPort)
 
@@ -60,34 +53,19 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 	}
 
 	// Deserialize the Header
-	pcktheader, err := DeserializeHeader(raw_packet)
+	packet, err := DeserializePacket(raw_packet)
 	if err != nil {
 		log.Printf("handleIncomingPackets: DeserializeHeader returned Error\n")
 		return
 	}
 
-	//fmt.Printf("Received packet: ConversationId=%s, SequenceNumber=%d, Data=%s, IsFinal=%t\n", packet.ConversationId, packet.SequenceNumber, packet.Data, packet.IsFinal)
-
-	// Create Packet
-	pckt := Pckt{*pcktheader, raw_packet[20:]}
-
-	// Find Corresponding Conversation
-	conversation_reference, exists := (conversations_map)[pcktheader.ConvID]
-
-	// If it exists, send the packet to the corresponding conversation
-	if exists {
-		conversation_reference.ARQ_Receive(conn, addr, pckt)
-	} else {
-		// Else create a new conversation
-		conversations_map_lock.Lock()
-		conversations_map[pcktheader.ConvID] = newConversation(pcktheader.ConvID)
-		conversations_map_lock.Unlock()
-
-		// and now send it there
-		conversations_map[pcktheader.ConvID].ARQ_Receive(conn, addr, pckt)
-
+	conversations_lock.Lock()
+	conversationRef, exists := conversations[packet.Header.ConvID]
+	if !exists {
+		conversationRef = newConversation(packet.Header.ConvID)
+		conversations[packet.Header.ConvID] = conversationRef
 	}
+	conversations_lock.Unlock()
 
-	// Print size of conversations list
-	fmt.Printf("Conversations: %d\n", len(conversations_map))
+	conversationRef.ARQ_Receive(conn, addr, *packet)
 }
