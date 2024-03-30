@@ -15,5 +15,5 @@ func main() {
 	conversations_lock.Unlock()
 
 	// Start Listener Thread
-	go listener(CLIENT_PORT_CONST)
+	go listener()
 }
