@@ -1,10 +1,17 @@
-// This file includes all of the global variables necessary for the function of the Node
-
 // Version 1.3
 package main
 
 import (
 	"sync"
+)
+
+// This file includes all of the global variables necessary for the function of the Node
+
+// Types
+const (
+	DATA = uint16(0)
+	ACK  = uint16(1)
+	NAK  = uint16(2)
 )
 
 // Global Constants
@@ -22,5 +29,8 @@ const CLIENT_PORT_CONST = "42069"
 var conversation_id_self = uint32(0)
 
 // Global Objects
+// var conversations_lock sync.Mutex
+
+// var conversations map[uint32]*conversation
 var conversations_lock sync.Mutex
 var conversations map[uint32]*conversation

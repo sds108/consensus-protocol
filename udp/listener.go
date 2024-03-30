@@ -69,3 +69,7 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 
 	conversationRef.ARQ_Receive(conn, addr, *packet)
 }
+
+func main() {
+	listener("8080")
+}

@@ -16,38 +16,38 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"os"
-	"sync"
-	"time"
+	//"os"
+	//"sync"
+	//"time"
 )
 
 var serverAddrStr = "127.0.0.1:8080"
 
 // Add global variables for window management
-var (
-	sendingWindowStart int = 1
-	sendingWindowSize  int = 5 // Adjust based on the requirements!!
-	packetStates           = make(map[int]*PacketState)
-	sentPackets            = make(map[int]Pckt)
-	ackReceived            = make(map[int]bool)
-	ackReceivedLock    sync.Mutex
-)
+// var (
+// 	sendingWindowStart int = 1
+// 	sendingWindowSize  int = 5 // Adjust based on the requirements!!
+// 	packetStates           = make(map[int]*PacketState)
+// 	sentPackets            = make(map[int]Pckt)
+// 	ackReceived            = make(map[int]bool)
+// 	ackReceivedLock    sync.Mutex
+// )
 
 // Constants for packet types ACK and NAK
-const (
-	ACK  = 1 // Assuming 1 for ACK
-	NACK = 2 // Automatically increments, assuming 2 for NAK
-)
+// const (
+// 	ACK  = 1 // Assuming 1 for ACK
+// 	NACK = 2 // Automatically increments, assuming 2 for NAK
+// )
 
 // Global variable for resend delay if packets not acknowledged
-var resendDelay = 20 * time.Second
+// var resendDelay = 20 * time.Second
 
 // PacketState holds the state of a packet, including whether an ACK was received and the last send time
-type PacketState struct {
-	AckReceived bool
-	LastSent    time.Time  // Timestamp of the last time the packet was sent
-	mutex       sync.Mutex // Mutex for concurrent access to the PacketState
-}
+// type PacketState struct {
+// 	AckReceived bool
+// 	LastSent    time.Time  // Timestamp of the last time the packet was sent
+// 	mutex       sync.Mutex // Mutex for concurrent access to the PacketState
+// }
 
 // main initialises the UDP connection and runs tests for the ARQ mechanism.
 func main() {
@@ -67,24 +67,30 @@ func main() {
 
 	conversation_id := rand.Int()
 
-	go managePacketResends(conn)
+	// Create a conversation instance
+	conv := newConversation(uint32(conversation_id))
 
 	// Test without packet loss
-	fmt.Println("1. Testing without packet loss...")
-	sendPacketsWithoutLoss(conn, 5, conversation_id)
+	// fmt.Println("1. Testing without packet loss...")
+	// conv.sendPacketsWithoutLoss(conn, serverAddr, 5)
 
 	// Test with simulated packet loss
 	fmt.Println("\n2. Testing with simulated packet loss...")
-	sendPacketsWithSimulatedLoss(conn, 5, conversation_id, 0.3) // 30% loss rate
+	conv.sendPacketsWithSimulatedLoss(conn, serverAddr, 5, 0.3) // 30% loss rate
 
-	// Test handling of duplicate packets
+	// // Test handling of duplicate packets
 	fmt.Println("\n3. Testing duplicate packet handling...")
-	sendAndDuplicatePacket(conn, 1, conversation_id)
+	conv.sendAndDuplicatePacket(conn, serverAddr, 1)
 
-	fmt.Println("\n4. Testing ARQ mechanism (observe server-side for behavior):")
-	testARQMechanism(conn, 5, conversation_id) // Implemented based on the ARQ design
+	// fmt.Println("\n4. Testing ARQ mechanism (observe server-side for behavior):")
+	conv.testARQMechanism(conn, serverAddr, 5)
+
+	//Test ARQ mechanism
+	// fmt.Println("\n4. Testing ARQ mechanism (observe server-side for behavior):")
+	// testARQMechanism(conn, 5, conversation_id) // Implemented based on the ARQ design
 }
 
+/*
 // Tests the ARQ mechanism
 func testARQMechanism(conn *net.UDPConn, totalPackets int, conversation_id int) {
 	for {
@@ -118,7 +124,7 @@ func testARQMechanism(conn *net.UDPConn, totalPackets int, conversation_id int) 
 func sendPacket(conn *net.UDPConn, seqNum int, conversation_id int, totalPackets int) {
 	packet := Pckt{
 		Header: PcktHeader{
-			Magic:       magic,
+			Magic:       MAGIC_CONST,
 			Checksum:    0, // Implement checksum calculation
 			ConvID:      uint32(conversation_id),
 			SequenceNum: uint32(seqNum),
@@ -184,11 +190,13 @@ func handleIncomingACKsNACKs(conn *net.UDPConn) {
 				packetState.mutex.Unlock()
 				delete(packetStates, seqNum) // Cleanup packet state
 			}
-		} else if ackPacket.Header.Type == NACK {
+			ackReceivedLock.Unlock()
+
+		} else if ackPacket.Header.Type == NAK {
 			log.Printf("NACK received for packet %d, resending.", seqNum)
+			ackReceivedLock.Unlock()
 			resendPacket(conn, uint32(seqNum), sentPackets)
 		}
-		ackReceivedLock.Unlock()
 	}
 
 }
@@ -241,6 +249,7 @@ func resendPacket(conn *net.UDPConn, seqNum uint32, packets map[int]Pckt) error 
 	ackReceivedLock.Lock()
 	defer ackReceivedLock.Unlock()
 	if ackReceived[int(seqNum)] {
+		fmt.Printf("Got Here\n")
 		// Packet already acknowledged, no need to resend
 		return nil
 	}
@@ -336,23 +345,6 @@ func sendAndDuplicatePacket(conn *net.UDPConn, seqNum int, conversation_id int) 
 	log.Printf("Duplicate packet sent: SequenceNumber=%d", seqNum)
 }
 
-func sendPacketsWithoutLoss(conn *net.UDPConn, totalPackets int, conversation_id int) {
-	for i := 1; i <= totalPackets; i++ {
-		packet := Pckt{
-			Header: PcktHeader{
-				ConvID:      uint32(conversation_id),
-				SequenceNum: uint32(i),
-				Type:        Data, // Assuming Data is a defined constant for packet type
-			},
-			Body: []byte(fmt.Sprintf("Packet without loss %d", i)),
-		}
-
-		packetData, _ := SerializePacket(packet)
-		_, _ = conn.Write(packetData)
-		log.Printf("Packet sent without loss: SequenceNumber=%d", i)
-	}
-}
-
 func sendPacketsWithSimulatedLoss(conn *net.UDPConn, totalPackets int, conversation_id int, lossRate float64) {
 	rand.Seed(time.Now().UnixNano()) // Initialize a random number generator
 
@@ -384,4 +376,4 @@ func testDuplicateHandling(conn *net.UDPConn, conversation_id int) {
 	sendAndDuplicatePacket(conn, 2, conversation_id)
 
 	// Can continue with more tests if needed?
-}
+} */
