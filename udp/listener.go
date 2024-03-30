@@ -4,16 +4,10 @@ import (
 	//"fmt"
 	"log"
 	"net"
-	"sync"
 )
 
-var (
-	udpPort       = "8080"
-	conversations = make(map[uint32]*conversation)
-	convMutex     sync.Mutex // Protects access to the conversations map
-)
-
-func listener() {
+func listener(udpPort string) {
+	// Resolve UDP Address to listen at
 	addr, err := net.ResolveUDPAddr("udp", ":"+udpPort)
 	if err != nil {
 		log.Fatal(err)
@@ -26,6 +20,7 @@ func listener() {
 	defer conn.Close()
 	log.Printf("UDP server listening on port %s", udpPort)
 
+	// Listen Continuously
 	for {
 		buffer := make([]byte, 4096)
 		n, addr, err := conn.ReadFromUDP(buffer)
@@ -38,29 +33,43 @@ func listener() {
 	}
 }
 
-func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, data []byte) {
-	if len(data) < 20 {
-		log.Printf("Packet size below 20 Bytes???\n")
+func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []byte) {
+	// Make sure Data is at least 20 Bytes
+	if len(raw_packet) < 20 {
+		log.Printf("handleIncomingPackets: insufficient packet size\n")
 		return
 	}
 
-	packet, err := DeserializePacket(data)
+	// Magic and Checksum check, if this fails, you would drop the packet
+	verify_packet, err := VerifyPacket(raw_packet)
 	if err != nil {
-		log.Printf("Error deserializing packet: %v", err)
+		log.Printf("handleIncomingPackets: VerifyPacket returned Error\n")
 		return
 	}
 
-	convMutex.Lock()
+	if !verify_packet {
+		log.Printf("handleIncomingPackets: VerifyPacket returned False\n")
+		return
+	}
+
+	// Deserialize the Header
+	packet, err := DeserializePacket(raw_packet)
+	if err != nil {
+		log.Printf("handleIncomingPackets: DeserializeHeader returned Error\n")
+		return
+	}
+
+	conversations_lock.Lock()
 	conversationRef, exists := conversations[packet.Header.ConvID]
 	if !exists {
 		conversationRef = newConversation(packet.Header.ConvID)
 		conversations[packet.Header.ConvID] = conversationRef
 	}
-	convMutex.Unlock()
+	conversations_lock.Unlock()
 
 	conversationRef.ARQ_Receive(conn, addr, *packet)
 }
 
 func main() {
-	listener()
+	listener("8080")
 }

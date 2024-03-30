@@ -1,10 +1,11 @@
-//GLobal
-// This file includes all of the global variables necessary for the function of the Node
-
 // Version 1.3
 package main
 
-// "sync"
+import (
+	"sync"
+)
+
+// This file includes all of the global variables necessary for the function of the Node
 
 // Types
 const (
@@ -31,3 +32,5 @@ var conversation_id_self = uint32(0)
 // var conversations_lock sync.Mutex
 
 // var conversations map[uint32]*conversation
+var conversations_lock sync.Mutex
+var conversations map[uint32]*conversation

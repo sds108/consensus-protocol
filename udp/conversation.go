@@ -85,16 +85,32 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 	conv.incoming_lock.Unlock()
 
 	// Makes a list of the missing packets
-
+	missingPackets := []uint32{}
 	for seq := uint32(1); seq <= conv.highestSeqReceived; seq++ {
-		if _, ok := conv.receivedPackets[uint32(seq)]; !ok {
-			log.Printf("Missing packet: %d. Sending NAK.", seq)
-			conv.sendNAK(conn, addr, uint32(seq))
+		if _, ok := conv.receivedPackets[seq]; !ok {
+			missingPackets = append(missingPackets, seq)
 		}
 	}
 
 	// Send an ACK for the received packet
 	conv.sendACK(conn, addr, pckt.Header.SequenceNum)
+	// Send an ACK for the received packet, including any missing packets.
+	ackPacket := Pckt{
+		Header: PcktHeader{
+			ConvID:      conv.conversation_id,
+			SequenceNum: pckt.Header.SequenceNum,
+			Type:        ACK,
+		},
+		Body:           []byte{},
+		MissingPackets: missingPackets,
+	}
+
+	ackData, _ := SerializePacket(ackPacket) // Updated to use SerializePacket
+	if _, err := conn.WriteToUDP(ackData, addr); err != nil {
+		log.Printf("Failed to send ACK for packet %d: %v", pckt.Header.SequenceNum, err)
+	} else {
+		fmt.Printf("Sent ACK for packet: %d with missing packets: %v\n", ackPacket.Header.SequenceNum, ackPacket.MissingPackets)
+	}
 }
 
 // sendNAK sends a NAK for a missing packet
