@@ -1,4 +1,3 @@
-// packet.go
 // Defines the packet structure and provides functions for packet serialization and deserialization
 package main
 
@@ -23,11 +22,11 @@ type PcktHeader struct {
 }
 
 // Types
-const (
-	Data = 0
-	// ACK  = 1
-	// NACK = 2
-)
+// const (
+// 	Data = 0
+// 	// ACK  = 1
+// 	// NACK = 2
+// )
 
 type Pckt struct {
 	Header         PcktHeader // 20 bytes
