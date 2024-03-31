@@ -54,7 +54,7 @@ func main() {
 func Brainloop() {
 	ReadInput()
 }
-
+//function for reading in the initial strings
 func ReadInput() {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Welcome\nWhat would you like to do?\nHere is a list of commands: \n ")
@@ -68,7 +68,7 @@ func ReadInput() {
 	input = strings.TrimSpace(input)
 	requestHandler(input)
 }
-
+//function entered if a vote request is initiated
 func request_vote_initiator(){
 	fmt.Print("Please input vote request, 'return' to go back or 'quit' to exit: ")
 
@@ -93,7 +93,7 @@ func request_vote_initiator(){
 			//--------------------------------------------------
 		}
 }
-
+//function entered if a request for client number on network is initiated
 func request_client_number(){
 	fmt.Print("You have chosen to request for number of clients on the network.\nProcessing...\n")
 
@@ -111,7 +111,7 @@ func request_client_ips(){
 	//--------------------------------------------------
 
 }
-
+//function for demonstrating SR maybe the send with loss function?
 func request_send_with_loss(){
 	fmt.Print("You have chosen to request for sending packets with loss to the server.\nProcessing...\n")
 
@@ -119,7 +119,7 @@ func request_send_with_loss(){
 	// Ken's send with loss function?
 	//--------------------------------------------------
 }
-
+//handler of inputs following initial input 
 func requestHandler(input string) {
 
 
