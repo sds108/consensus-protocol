@@ -49,8 +49,8 @@ func Read_Input(){
 }
 
 func request_handler( input){
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
+	// reader := bufio.NewReader(os.Stdin)
+	// input, err := reader.ReadString('\n')
 	if input == "request vote" || input == "Request Vote" || input == "Request vote"{
 		fmt.Print("Please input vote request or 'escape' to exit")
 
