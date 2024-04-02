@@ -14,42 +14,22 @@ import (
 type sliding_window struct {
 	// Outgoing map (holds pointers to packet objects to be sent)
 	// (first key is Packet Number, second key is Sequence Number)
-	outgoing      map[uint32](map[uint32]*Pckt)
+	outgoing      map[uint32]*Pckt
 	outgoing_lock sync.Mutex
 
 	// Sliding Window (SR) attributes
-	window      []*Pckt
 	windowStart uint32
 	windowSize  uint32
 	nextPcktNum uint32
-
-	// Transmission Ticker
-	transmission_ticker *time.Ticker
-
-	// Retransmission Ticker
-	retransmission_ticker *time.Ticker
 }
 
 // Handles the SR functionality for incoming packets
 type receiving_window struct {
 	// Buffer for incoming packets
-	// (first key is Packet Number, second key is Sequence Number)
-	incoming      map[uint32](map[uint32]*Pckt)
-	incoming_lock sync.Mutex
-	// (key is Packet Number, Values are last sequence received for each packet)
-	lastSeqReceived map[uint32]uint32
-}
-
-// Holds reassembled packets ready for the incomming processor to take care of
-type packet_basket struct {
-	// The basket holds the body of each complete packet
-	basket      map[uint32]([]byte)
-	done        map[uint32]bool
-	basket_lock sync.Mutex
-	lastPcktNum uint32
-
-	// Packet Processing Ticker
-	processing_ticker *time.Ticker
+	// the key is the packet number
+	incoming         map[uint32]*Pckt
+	incoming_lock    sync.Mutex
+	lastPcktReceived uint32
 }
 
 // Structure container, connection free and instead dependent on the conversation's ID
@@ -59,9 +39,6 @@ type conversation struct {
 
 	// SR Receiver Structure
 	receiver *receiving_window
-
-	// Basket for reassembled packets
-	bskt *packet_basket
 
 	// SR Sender Structure
 	sender *sliding_window
@@ -76,48 +53,25 @@ func newConversation(conversation_id uint32, conv_addr *net.UDPAddr) *conversati
 		conversation_id:   conversation_id,
 		conversation_addr: conv_addr,
 		receiver: &receiving_window{
-			incoming:        make(map[uint32](map[uint32]*Pckt)),
-			lastSeqReceived: make(map[uint32]uint32),
-		},
-		bskt: &packet_basket{
-			basket:            make(map[uint32][]byte),
-			done:              make(map[uint32]bool),
-			lastPcktNum:       0,
-			processing_ticker: time.NewTicker(200 * time.Millisecond),
+			incoming:         make(map[uint32]*Pckt),
+			lastPcktReceived: 0,
 		},
 		sender: &sliding_window{
-			outgoing:              make(map[uint32](map[uint32]*Pckt)),
-			window:                make([]*Pckt, 0),
-			windowStart:           0,
-			windowSize:            5,
-			nextPcktNum:           0,
-			transmission_ticker:   time.NewTicker(500 * time.Millisecond),
-			retransmission_ticker: time.NewTicker(1000 * time.Millisecond),
+			outgoing:    make(map[uint32]*Pckt),
+			windowStart: 0,
+			windowSize:  5,
+			nextPcktNum: 0,
 		},
 	}
 }
 
-// startConversation starts all of the Go Routines associated with said conversation
-func (conv *conversation) startConversation() {
-	// Start Incoming Processor
-	// go conv.incomingProcessor()
-
-	// // Start Outgoing Processor
-	// go conv.sendWindowPackets()
-
-	// // Start Retransmission Checker
-	// go conv.checkForRetransmissions()
-
-	go conv.looper()
-}
-
+// startConversation starts all of the Routines associated with said conversation
 func (conv *conversation) looper() {
 	for true {
-		//fmt.Println("looping")
 		conv.incomingProcessor()
 		conv.sendWindowPackets()
 		conv.checkForRetransmissions()
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(3 * time.Millisecond)
 	}
 }
 
@@ -131,126 +85,80 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 			// Send ACK for packet
 			conv.sendACK(pckt.Header.PacketNum, pckt.Header.SequenceNum)
 
-			fmt.Println(pckt)
-
 			// Lock Receiver
 			conv.receiver.incoming_lock.Lock()
+			defer conv.receiver.incoming_lock.Unlock()
 
-			// Check if sub map exists
-			if _, exists := conv.receiver.incoming[pckt.Header.PacketNum]; !exists {
-				conv.receiver.incoming[pckt.Header.PacketNum] = make(map[uint32]*Pckt)
-				conv.receiver.lastSeqReceived[pckt.Header.PacketNum] = 0
+			// Check if single fragment packet
+			if pckt.Header.IsFinal == 0 || pckt.Header.SequenceNum > 0 {
+				// drop fragment packet
+				conv.receiver.lastPcktReceived = pckt.Header.PacketNum
+				fmt.Printf("Rejecting Multi Fragment Packet %d.\n", pckt.Header.PacketNum)
+				return
 			}
 
-			// Check for duplicate packets
-			if _, exists := conv.receiver.incoming[pckt.Header.PacketNum][pckt.Header.SequenceNum]; exists {
-				fmt.Printf("Duplicate packet received: %d.\n", pckt.Header.SequenceNum)
-				//conv.receiver.incoming_lock.Unlock()
-				//return // Return early to avoid any window movement or state change
+			// Check if duplicate
+			if _, exists := conv.receiver.incoming[pckt.Header.PacketNum]; !exists {
+				//fmt.Println(pckt)
+				conv.receiver.incoming[pckt.Header.PacketNum] = &pckt
+				conv.receiver.lastPcktReceived = pckt.Header.PacketNum
 			} else {
-				// Store Packet Pointer to Incoming Buffer inside the receiver
-				conv.receiver.incoming[pckt.Header.PacketNum][pckt.Header.SequenceNum] = &pckt
+				fmt.Printf("Duplicate packet received: %d.\n", pckt.Header.PacketNum)
 			}
 
 			// Updates the highest sequence number if required
-			if pckt.Header.SequenceNum > conv.receiver.lastSeqReceived[pckt.Header.PacketNum] {
-				if pckt.Header.SequenceNum > conv.receiver.lastSeqReceived[pckt.Header.PacketNum]+1 {
-					for i := conv.receiver.lastSeqReceived[pckt.Header.PacketNum] + 1; i < pckt.Header.SequenceNum; i++ {
+			if pckt.Header.PacketNum > conv.receiver.lastPcktReceived {
+				// check for gap
+				if pckt.Header.PacketNum > conv.receiver.lastPcktReceived+1 {
+					for i := conv.receiver.lastPcktReceived + 1; i < pckt.Header.PacketNum; i++ {
 						fmt.Printf("Packet %d: %d does not exist, sending NACK\n", pckt.Header.PacketNum, pckt.Header.SequenceNum)
-						conv.sendNAK(pckt.Header.PacketNum, i)
+						conv.sendNAK(i, 0)
 					}
 				}
-				conv.receiver.lastSeqReceived[pckt.Header.PacketNum] = pckt.Header.SequenceNum
+				conv.receiver.lastPcktReceived = pckt.Header.PacketNum
 			}
-
-			// Check if ready to be reassembled, send Nacks for gaps
-			if conv.receiver.incoming[pckt.Header.PacketNum][conv.receiver.lastSeqReceived[pckt.Header.PacketNum]].Header.IsFinal == uint16(1) {
-				// Boolean will remain true if all segments found
-				fullPacket := true
-
-				// Check for gaps
-				for i := uint32(0); i <= uint32(conv.receiver.lastSeqReceived[pckt.Header.PacketNum]); i++ {
-					// Make sure Packet Segment exists
-					if _, exists := conv.receiver.incoming[pckt.Header.PacketNum][i]; !exists {
-						fullPacket = false
-						//conv.sendNAK(pckt.Header.PacketNum, i)
-						break
-					}
-				}
-
-				// Reassemble Packet
-				if fullPacket {
-					// Lock Basket
-					//conv.bskt.basket_lock.Lock()
-
-					// Check if Full Packet already exists in the basket
-					if _, exists := conv.bskt.basket[pckt.Header.PacketNum]; exists {
-						fmt.Printf("Packet %d already present in basket\n", pckt.Header.PacketNum)
-					} else {
-						conv.bskt.basket[pckt.Header.PacketNum] = make([]byte, 0)
-					}
-
-					if conv.bskt.done[pckt.Header.PacketNum] == false {
-						conv.bskt.done[pckt.Header.PacketNum] = true
-						for seqNum := uint32(0); seqNum < uint32(len(conv.receiver.incoming[pckt.Header.PacketNum])); seqNum++ {
-							// Combine Segments
-							conv.bskt.basket[pckt.Header.PacketNum] = append(conv.bskt.basket[pckt.Header.PacketNum], conv.receiver.incoming[pckt.Header.PacketNum][seqNum].Body...)
-						}
-					}
-
-					// Unlock Basket
-					//conv.bskt.basket_lock.Unlock()
-				}
-			}
-
-			// Unlock Receiver
-			conv.receiver.incoming_lock.Unlock()
 		}
 
 	case ACK:
 		{
-			fmt.Printf("Got an ACK\n")
+			fmt.Printf("Got an ACK for Packet %d.\n", pckt.Header.PacketNum)
 
 			// Lock Sender
 			conv.sender.outgoing_lock.Lock()
+			defer conv.sender.outgoing_lock.Unlock()
 
 			// Make sure outgoing packet exists
-			if _, exists := conv.sender.outgoing[pckt.Header.PacketNum][pckt.Header.SequenceNum]; !exists {
-				log.Printf("Packet %d does not exist, cannot Ack.", pckt.Header.SequenceNum)
+			if _, exists := conv.sender.outgoing[pckt.Header.PacketNum]; !exists {
+				log.Printf("Packet %d does not exist, cannot Ack.", pckt.Header.PacketNum)
 				return // Drop Ack
 			}
 
 			// Set Ack received state to true
-			conv.sender.outgoing[pckt.Header.PacketNum][pckt.Header.SequenceNum].AckReceived = true
-
-			// Unlock Sender
-			conv.sender.outgoing_lock.Unlock()
+			conv.sender.outgoing[pckt.Header.PacketNum].AckReceived = true
 		}
 
 	case NAK:
 		{
-			fmt.Printf("Got a NACK\n")
+			fmt.Printf("Got a NACK for Packet %d.\n", pckt.Header.PacketNum)
 
 			// Lock Sender
 			conv.sender.outgoing_lock.Lock()
+			defer conv.sender.outgoing_lock.Unlock()
 
 			// Make sure outgoing packet exists
-			if _, exists := conv.sender.outgoing[pckt.Header.PacketNum][pckt.Header.SequenceNum]; !exists {
-				log.Printf("Packet %d does not exist, cannot resend for Nack.", pckt.Header.SequenceNum)
+			if _, exists := conv.sender.outgoing[pckt.Header.PacketNum]; !exists {
+				log.Printf("Packet %d does not exist, cannot resend for Nack.", pckt.Header.PacketNum)
 				return // Drop Nack
 			}
 
 			// Make sure packet wasn't Acked before the lock
-			if conv.sender.outgoing[pckt.Header.PacketNum][pckt.Header.SequenceNum].AckReceived == true {
-				log.Printf("Packet %d already Acked, won't resend.", pckt.Header.SequenceNum)
+			if conv.sender.outgoing[pckt.Header.PacketNum].AckReceived == true {
+				log.Printf("Packet %d already Acked, won't resend.", pckt.Header.PacketNum)
 				return // Drop Nack
 			}
 
 			// Resend Packet
-			conv.sendPacket(conv.sender.outgoing[pckt.Header.PacketNum][pckt.Header.SequenceNum])
-
-			// Unlock Sender
-			conv.sender.outgoing_lock.Unlock()
+			conv.sendPacket(conv.sender.outgoing[pckt.Header.PacketNum])
 		}
 
 	case SYN:
@@ -277,12 +185,11 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 
 // sendHello sends a Hello Packet
 func (conv *conversation) sendHello() {
-	fmt.Println("\nSending Hello\n")
 	// Create the Hello Struct for the body of the Packet
 	helloBody := PcktHello{
 		DataID:      hello_c2s,
 		Version:     0,
-		NumFeatures: 300,
+		NumFeatures: 0,
 		Features:    []uint16{1, 1, 2, 3, 2, 1, 2, 1, 2, 3, 4, 1, 4, 4},
 	}
 
@@ -293,6 +200,7 @@ func (conv *conversation) sendHello() {
 
 	// Lock outgoing
 	conv.sender.outgoing_lock.Lock()
+	defer conv.sender.outgoing_lock.Unlock()
 
 	helloPacket := Pckt{
 		Header: PcktHeader{
@@ -309,53 +217,23 @@ func (conv *conversation) sendHello() {
 
 	helloPacket.Body = append(helloPacket.Body, helloBody_bytes...)
 
-	conv.fragmentator(&helloPacket)
+	// Make Sure we're not exceeding Maximum Packet Size
+	if len(helloPacket.Body) > MAX_PCKT_SIZE {
+		// Drop this packet
+		return
+	} else {
+		// Append to outgoing
+		conv.sender.outgoing[helloPacket.Header.PacketNum] = &helloPacket
 
-	// Increment next Packet Number
-	conv.sender.nextPcktNum += 1
+		// Increment next Packet Number
+		conv.sender.nextPcktNum += 1
+	}
 
-	conv.sender.outgoing_lock.Unlock()
 }
 
 // sendHelloBack sends a Hello Back Packet
 func (conv *conversation) sendHelloResonse() {
-	// Create the Hello Struct for the body of the Packet
-	helloResponseBody := PcktHello{
-		DataID:      hello_back_s2c,
-		Version:     0,
-		NumFeatures: 1,
-		Features:    []uint16{1},
-	}
 
-	helloResponseBody_bytes, err := SerializeHello(&helloResponseBody)
-	if err != nil {
-		return
-	}
-
-	// Lock outgoing
-	conv.sender.outgoing_lock.Lock()
-
-	helloResponsePacket := Pckt{
-		Header: PcktHeader{
-			Magic:       MAGIC_CONST,
-			Checksum:    0,
-			ConvID:      conversation_id_self,
-			PacketNum:   conv.sender.nextPcktNum,
-			SequenceNum: 0,
-			Type:        DATA,
-			IsFinal:     1,
-		},
-		Body: make([]byte, 0),
-	}
-
-	helloResponsePacket.Body = append(helloResponsePacket.Body, helloResponseBody_bytes...)
-
-	conv.fragmentator(&helloResponsePacket)
-
-	// Increment next Packet Number
-	conv.sender.nextPcktNum += 1
-
-	conv.sender.outgoing_lock.Unlock()
 }
 
 // sendSYN sends a SYN
@@ -430,75 +308,6 @@ func (conv *conversation) sendACK(pcktNum uint32, seqNum uint32) {
 	conv.sendPacket(&ackPacket)
 }
 
-func (conv *conversation) fragmentator(pckt *Pckt) {
-
-	// Check if it already exists
-	if _, exists := conv.sender.outgoing[pckt.Header.PacketNum]; !exists {
-		conv.sender.outgoing[pckt.Header.PacketNum] = make(map[uint32]*Pckt)
-	}
-
-	// Check if the packet needs to be fragmented
-	for seqNum := uint32(0); seqNum < uint32((len(pckt.Body)/FRAGMENT_CONST)+1); seqNum++ {
-
-		// Check if final
-		if seqNum+1 >= uint32((len(pckt.Body)/FRAGMENT_CONST)+1) {
-			var newPckt Pckt
-			newPckt = Pckt{
-				Header: PcktHeader{
-					Magic:       MAGIC_CONST,
-					Checksum:    0,
-					ConvID:      pckt.Header.ConvID,
-					PacketNum:   pckt.Header.PacketNum,
-					SequenceNum: seqNum,
-					IsFinal:     1,
-					Type:        pckt.Header.Type,
-				},
-				Body:        make([]byte, 0),
-				AckReceived: false,
-				LastSent:    time.Now(),
-			}
-
-			newPckt.Body = append(newPckt.Body, pckt.Body[seqNum*FRAGMENT_CONST:]...)
-
-			fmt.Println(newPckt)
-
-			// Add to Sliding window
-			conv.sender.outgoing[newPckt.Header.PacketNum][newPckt.Header.SequenceNum] = &newPckt
-			conv.sender.window = append(conv.sender.window, &newPckt)
-		} else {
-			var newPckt Pckt
-			newPckt = Pckt{
-				Header: PcktHeader{
-					Magic:       MAGIC_CONST,
-					Checksum:    0,
-					ConvID:      pckt.Header.ConvID,
-					PacketNum:   pckt.Header.PacketNum,
-					SequenceNum: seqNum,
-					IsFinal:     0,
-					Type:        pckt.Header.Type,
-				},
-				Body:        make([]byte, 0),
-				AckReceived: false,
-				LastSent:    time.Now(),
-			}
-
-			newPckt.Body = append(newPckt.Body, pckt.Body[seqNum*FRAGMENT_CONST:FRAGMENT_CONST+seqNum*FRAGMENT_CONST]...)
-
-			fmt.Println(newPckt)
-
-			// Add to Sliding window
-			conv.sender.outgoing[newPckt.Header.PacketNum][newPckt.Header.SequenceNum] = &newPckt
-			conv.sender.window = append(conv.sender.window, &newPckt)
-		}
-
-		//fmt.Print(conv.sender.window)
-
-		//fmt.Printf("Adding packet: ConversationId=%d, PacketNumber=%d, SequenceNumber=%d, Data=%s, IsFinal=%t\n", newPckt.Header.ConvID, newPckt.Header.SequenceNum, newPckt.Header.SequenceNum, string(newPckt.Body), newPckt.Header.IsFinal != 0)
-	}
-
-	fmt.Print(conv.sender.window)
-}
-
 // Sends a packet and updates its state in the packetStates map, marks it as sent and records the sending time.
 func (conv *conversation) sendPacket(pckt *Pckt) error {
 	// Send Packet
@@ -521,19 +330,18 @@ func (conv *conversation) sendPacket(pckt *Pckt) error {
 
 // Manages the sending window by sending packets within the window size, ensures packets are sent in sequence
 func (conv *conversation) sendWindowPackets() {
-	//for range conv.sender.transmission_ticker.C {
 	conv.sender.outgoing_lock.Lock()
 
 	conv.moveWindow()
 
 	for i := conv.sender.windowStart; i < conv.sender.windowStart+conv.sender.windowSize; i++ {
-		// Make sure we are not going outside of the Slice
-		if i < uint32(len(conv.sender.window)) {
+		// Make sure packet exists in outgoing
+		if _, exists := conv.sender.outgoing[i]; exists {
 			// Make sure it's not a NULL pointer
-			if conv.sender.window[i] != nil {
+			if conv.sender.outgoing[i] != nil {
 				// Make sure we haven't received an ACK for it before this function
-				if !conv.sender.window[i].AckReceived {
-					conv.sendPacket(conv.sender.window[i])
+				if !conv.sender.outgoing[i].AckReceived {
+					conv.sendPacket(conv.sender.outgoing[i])
 				}
 			} else {
 				log.Printf("NULL pointer in window slice")
@@ -545,165 +353,117 @@ func (conv *conversation) sendWindowPackets() {
 	}
 
 	conv.sender.outgoing_lock.Unlock()
-	//}
 }
 
 // Handles the window sliding as packets are acknowledged.
 func (conv *conversation) moveWindow() {
-	//conv.sender.outgoing_lock.Lock() // Ensure thread-safe access to the sender
-
-	//fmt.Println("Moving window")
-
 	var original_windowStart uint32 = conv.sender.windowStart
 
 	for i := original_windowStart; i < original_windowStart+conv.sender.windowSize; i++ {
-		// Make sure we are not going outside of the Slice
-		if i < uint32(len(conv.sender.window)) {
+		// Make sure packet exists in outgoing
+		if _, exists := conv.sender.outgoing[i]; exists {
 			// Make sure it's not a NULL pointer
-			if conv.sender.window[i] != nil {
-				if conv.sender.window[i].AckReceived {
+			if conv.sender.outgoing[i] != nil {
+				if conv.sender.outgoing[i].AckReceived {
 					// Move window if this packet is ACKed
 					conv.sender.windowStart += 1
-					fmt.Printf("Packet %d: %d Acked, moved window start to %d\n", conv.sender.window[i].Header.PacketNum, conv.sender.window[i].Header.SequenceNum, conv.sender.windowStart)
+
+					// Delete Acked Packet
+					delete(conv.sender.outgoing, i)
 				} else {
 					// Stop moving window
 					break
 				}
 			} else {
-				log.Printf("NULL pointer in window slice")
+				log.Printf("NULL pointer in outgoing.\n")
 			}
 		} else {
-			//log.Printf("Move Window: Reached the end of the window")
-			break
+			//log.Printf("Packet %d doesn't exist in outgoing.\n", i)
 		}
 	}
-
-	// Remove acknowledged packet state to save memory
-	if conv.sender.windowStart > 0 {
-		conv.sender.window = conv.sender.window[conv.sender.windowStart:]
-
-		// Reset other variables
-		conv.sender.windowStart = 0
-	}
-
-	//fmt.Println("Finished Moving Window")
-
-	//conv.sender.outgoing_lock.Unlock() // Ensure thread-safe access to the sender
 }
 
 // Implementation of timers for managing packet resends, periodically checks the sliding window and
 // resends any packets that have not been acknowledged after a certain time interval.
 func (conv *conversation) checkForRetransmissions() {
-	//for range conv.sender.retransmission_ticker.C {
 	conv.sender.outgoing_lock.Lock() // Ensure thread-safe access to sender
 
-	//fmt.Printf("Window Size %d\n", len(conv.sender.window))
-
-	if len(conv.sender.window) > 0 {
-		for i := uint32(0); i < uint32(len(conv.sender.window)); i++ {
-			if i < uint32(len(conv.sender.window)) {
-				//fmt.Printf("Window Start %d\n", conv.sender.windowStart)
-				//fmt.Printf("i = %d\n", i)
-				if conv.sender.window[i] != nil {
-					//log.Print(conv.sender.window[i].LastSent)
-					//log.Print(conv.sender.window[i].AckReceived)
-					if !conv.sender.window[i].AckReceived && time.Since(conv.sender.window[i].LastSent) > 1000*time.Millisecond {
-						fmt.Println("Resending %d: %d \n", conv.sender.window[i].Header.PacketNum, conv.sender.window[i].Header.SequenceNum)
-						conv.sendPacket(conv.sender.window[i])
+	if len(conv.sender.outgoing) > 0 {
+		for i := conv.sender.windowStart; i < conv.sender.windowStart+conv.sender.windowSize; i++ {
+			// Make sure packet exists in outgoing
+			if _, exists := conv.sender.outgoing[i]; exists {
+				if conv.sender.outgoing[i] != nil {
+					if !conv.sender.outgoing[i].AckReceived && time.Since(conv.sender.outgoing[i].LastSent) > 1000*time.Millisecond {
+						fmt.Println("Resending %d.\n", conv.sender.outgoing[i].Header.PacketNum)
+						conv.sendPacket(conv.sender.outgoing[i])
 					}
+				} else {
+					log.Printf("NULL pointer in outgoing.\n")
 				}
 			} else {
-				//fmt.Printf("Check for Retransmission: Going outside of window\n")
-				break
+				//log.Printf("Packet %d doesn't exist in outgoing.\n", i)
 			}
 		}
 	}
 
 	conv.sender.outgoing_lock.Unlock()
-	//}
 }
 
-/*
-func (conv *conversation) incomingProcessor(raw_data []byte) {
-	//for range conv.bskt.processing_ticker.C {
-
-	fmt.Println("We got out 4")
-	// Lock Basket
-
-	fmt.Println("We are here, basket size is %d", len(conv.bskt.basket))
+func (conv *conversation) incomingProcessor() {
+	// Lock incoming
+	conv.receiver.incoming_lock.Lock()
+	defer conv.receiver.incoming_lock.Unlock()
 
 	// Check if there are any packets waiting to be processed
-	if len(conv.bskt.basket) > 0 {
-
-		// Get minimum Packet Number
-		// var minPcktNum uint32 = 0xFFFFFFFF
-		// for pcktNum := range conv.bskt.basket {
-		// 	if minPcktNum > pcktNum && conv.bskt.done[pcktNum] == false {
-		// 		minPcktNum = pcktNum
-		// 	}
-		// }
-
-		// Check if there is a gap between the last packet processed and the minimum next Packet Number
-		// if conv.bskt.lastPcktNum+1 < minPcktNum {
-		// 	// Unlock Basket, and wait for the missing packet
-		// 	conv.bskt.basket_lock.Unlock()
-		// 	return
-		// 	//continue
-		// }
+	if len(conv.receiver.incoming) > 0 {
 
 		var minPcktNum uint32
 
-		for pcktNum := range conv.bskt.basket {
+		for pcktNum := range conv.receiver.incoming {
 			minPcktNum = pcktNum
 			break
 		}
 
 		// Make sure it actually exists
-		if _, exists := conv.bskt.basket[minPcktNum]; !exists {
-			log.Printf("Packet %d does not exist in basket.", minPcktNum)
-			// Unlock Basket, and panic
+		if _, exists := conv.receiver.incoming[minPcktNum]; !exists {
+			log.Printf("Packet %d does not exist in incoming.", minPcktNum)
 			return
-			//continue
+		} else {
+			// Delete Packet from incoming after we're done with it
+			defer delete(conv.receiver.incoming, minPcktNum)
 		}
 
 		// Process the next packet
-		DataID, err := DeserializeDataID(conv.bskt.basket[minPcktNum][:2])
+		DataID, err := DeserializeDataID(conv.receiver.incoming[minPcktNum].Body[:2])
 		if err != nil {
 			log.Printf("Couldn't get Data ID")
-			// Unlock Basket, and panic
 			return
-			//continue
 		}
-
-		conv.bskt.done[minPcktNum] = true
 
 		switch DataID {
 		case hello_c2s:
 			{
 				log.Printf("Got a hello\n")
-				hello, err := DeserializeHello(conv.bskt.basket[minPcktNum])
+				hello, err := DeserializeHello(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
 					log.Printf("Could't Deserialize Hello Packet")
-					// Unlock Basket, and panic
 					return
-					//continue
 				}
 
 				fmt.Println(hello.Version)
 
 				// Send a Hello Back
 				conv.sendHello()
+
 			}
 
 		case hello_back_s2c:
 			{
 				log.Printf("Got a hello back\n")
-				hello_back, err := DeserializeHello(conv.bskt.basket[minPcktNum])
+				hello_back, err := DeserializeHello(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
 					log.Printf("Could't Deserialize Hello Back Packet")
-					// Unlock Basket, and panic
 					return
-					//continue
 				}
 
 				// Print for testing
@@ -716,12 +476,10 @@ func (conv *conversation) incomingProcessor(raw_data []byte) {
 
 		case vote_c2s_request_vote:
 			{
-				vote_request, err := DeserializeVoteRequest(conv.bskt.basket[minPcktNum])
+				vote_request, err := DeserializeVoteRequest(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
 					log.Printf("Could't Deserialize Vote Request from Client Packet")
-					// Unlock Basket, and panic
 					return
-					//continue
 				}
 
 				fmt.Print(vote_request.Question)
@@ -731,12 +489,10 @@ func (conv *conversation) incomingProcessor(raw_data []byte) {
 
 		case vote_s2c_broadcast_question:
 			{
-				vote_broadcast_question, err := DeserializeVoteRequest(conv.bskt.basket[minPcktNum])
+				vote_broadcast_question, err := DeserializeVoteRequest(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
 					log.Printf("Could't Deserialize Vote Broadcast Question from Server Packet")
-					// Unlock Basket, and panic
 					return
-					//continue
 				}
 
 				fmt.Print(vote_broadcast_question.Question)
@@ -746,12 +502,10 @@ func (conv *conversation) incomingProcessor(raw_data []byte) {
 
 		case vote_c2s_response_to_question:
 			{
-				vote_response, err := DeserializeVoteResponse(conv.bskt.basket[minPcktNum])
+				vote_response, err := DeserializeVoteResponse(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
 					log.Printf("Could't Deserialize Vote Response from Client Packet")
-					// Unlock Basket, and panic
 					return
-					//continue
 				}
 
 				fmt.Print(vote_response.Response)
@@ -761,12 +515,10 @@ func (conv *conversation) incomingProcessor(raw_data []byte) {
 
 		case vote_s2c_broadcast_result:
 			{
-				vote_broadcast_result, err := DeserializeVoteResponse(conv.bskt.basket[minPcktNum])
+				vote_broadcast_result, err := DeserializeVoteResponse(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
 					log.Printf("Could't Deserialize Vote Broadcast Result from Server Packet")
-					// Unlock Basket, and panic
 					return
-					//continue
 				}
 
 				fmt.Print(vote_broadcast_result.Response)
@@ -777,158 +529,9 @@ func (conv *conversation) incomingProcessor(raw_data []byte) {
 		default:
 			{
 				log.Printf("Received an Unknown Data ID")
-				// Unlock Basket, and panic
-				return
-				//continue
 			}
 		}
 	}
-}
-*/
-
-func (conv *conversation) incomingProcessor() {
-	//for range conv.bskt.processing_ticker.C {
-	// Lock Basket
-	conv.receiver.incoming_lock.Lock()
-
-	fmt.Println("We are here, basket size is %d", len(conv.bskt.basket))
-
-	// Check if there are any packets waiting to be processed
-	if len(conv.bskt.basket) > 0 {
-
-		fmt.Println("We through")
-
-		// Get minimum Packet Number
-		// var minPcktNum uint32 = 0xFFFFFFFF
-		// for pcktNum := range conv.bskt.basket {
-		// 	if minPcktNum > pcktNum && conv.bskt.done[pcktNum] == false {
-		// 		minPcktNum = pcktNum
-		// 	}
-		// }
-
-		// Check if there is a gap between the last packet processed and the minimum next Packet Number
-		// if conv.bskt.lastPcktNum+1 < minPcktNum {
-		// 	// Unlock Basket, and wait for the missing packet
-		// 	conv.bskt.basket_lock.Unlock()
-		// 	return
-		// 	//continue
-		// }
-
-		var minPcktNum uint32
-
-		for pcktNum := range conv.bskt.basket {
-			minPcktNum = pcktNum
-			break
-		}
-
-		// Make sure it actually exists
-		if _, exists := conv.bskt.basket[minPcktNum]; !exists {
-			log.Printf("Packet %d does not exist in basket.", minPcktNum)
-		} else {
-			// Process the next packet
-			DataID, err := DeserializeDataID(conv.bskt.basket[minPcktNum][:2])
-			if err != nil {
-				log.Printf("Couldn't get Data ID")
-			} else {
-				switch DataID {
-				case hello_c2s:
-					{
-						log.Printf("Got a hello\n")
-						hello, err := DeserializeHello(conv.bskt.basket[minPcktNum])
-						if err != nil {
-							log.Printf("Could't Deserialize Hello Packet")
-						} else {
-							fmt.Println(hello.Version)
-
-							// Send a Hello Back
-							conv.sendHello()
-							conv.sendHello()
-							conv.sendHello()
-							conv.sendHello()
-						}
-					}
-
-				case hello_back_s2c:
-					{
-						log.Printf("Got a hello back\n")
-						hello_back, err := DeserializeHello(conv.bskt.basket[minPcktNum])
-						if err != nil {
-							log.Printf("Could't Deserialize Hello Back Packet")
-						} else {
-							// Print for testing
-							fmt.Printf("\nClient's Features...\n")
-							fmt.Print(hello_back.Features, "\n\n")
-
-							// Do nothing
-							conv.sendHello()
-						}
-					}
-
-				case vote_c2s_request_vote:
-					{
-						vote_request, err := DeserializeVoteRequest(conv.bskt.basket[minPcktNum])
-						if err != nil {
-							log.Printf("Could't Deserialize Vote Request from Client Packet")
-						} else {
-							fmt.Print(vote_request.Question)
-
-							// As Server, Begin a vote
-						}
-					}
-
-				case vote_s2c_broadcast_question:
-					{
-						vote_broadcast_question, err := DeserializeVoteRequest(conv.bskt.basket[minPcktNum])
-						if err != nil {
-							log.Printf("Could't Deserialize Vote Broadcast Question from Server Packet")
-						} else {
-							fmt.Print(vote_broadcast_question.Question)
-
-							// As a Client, Process Question and send your response back to server
-						}
-					}
-
-				case vote_c2s_response_to_question:
-					{
-						vote_response, err := DeserializeVoteResponse(conv.bskt.basket[minPcktNum])
-						if err != nil {
-							log.Printf("Could't Deserialize Vote Response from Client Packet")
-						} else {
-							fmt.Print(vote_response.Response)
-
-							// As Server, log Client response
-						}
-					}
-
-				case vote_s2c_broadcast_result:
-					{
-						vote_broadcast_result, err := DeserializeVoteResponse(conv.bskt.basket[minPcktNum])
-						if err != nil {
-							log.Printf("Could't Deserialize Vote Broadcast Result from Server Packet")
-						} else {
-							fmt.Print(vote_broadcast_result.Response)
-
-							// As Client, overwrite your own response to the Question if you got it wrong
-						}
-					}
-
-				default:
-					{
-						log.Printf("Received an Unknown Data ID")
-					}
-				}
-			}
-
-			// Delete Packet from basket
-			delete(conv.bskt.basket, minPcktNum)
-		}
-	}
-
-	// Unlock Basket
-	conv.receiver.incoming_lock.Unlock()
-
-	fmt.Println("and we're out")
-	//}
 }
 
 /*

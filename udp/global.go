@@ -50,7 +50,7 @@ const (
 
 const MAGIC_CONST = 0x01051117
 
-const FRAGMENT_CONST = 20
+const MAX_PCKT_SIZE = 250
 
 // Returns MAGIC_CONST in Big Endian Bytes
 func MAGIC_BYTES_CONST() []byte {

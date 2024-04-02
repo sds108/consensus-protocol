@@ -22,8 +22,11 @@ type host_referendum struct {
 	// the index is the conversationID of each participant
 	participants map[uint32]*conversation
 
-	// Participant Responses, the index is the conversationID of each participant
-	votes map[uint32]uint16
+	// Who has voted already, the index is the conversationID of each participant
+	who map[uint32]bool
+
+	// Each response counter
+	votes map[uint16]uint64
 }
 
 // This function copies the current conversations we have a connection with into the participants map
@@ -45,7 +48,8 @@ func (manager *referendum_manager) newHostReferendum(pckt *PcktVoteRequest) *hos
 		Question:     pckt.Question,
 		ongoing:      true,
 		participants: make(map[uint32]*conversation),
-		votes:        make(map[uint32]uint16),
+		who:          make(map[uint32]bool),
+		votes:        make(map[uint16]uint64),
 	}
 }
 
@@ -63,8 +67,11 @@ type client_referendum struct {
 	result uint16
 }
 
-func (manager *referendum_manager) newClientReferendum() {
-
+func (manager *referendum_manager) newClientReferendum(pckt *PcktVoteRequest) *client_referendum {
+	return &client_referendum{
+		VoteID:   pckt.VoteID,
+		Question: pckt.Question,
+	}
 }
 
 type referendum_manager struct {
@@ -85,35 +92,29 @@ func newReferendumManager() *referendum_manager {
 }
 
 // Used by the Packet Processor when the PcktVoteRequest packet comes in
-func (manager *referendum_manager) create_referendum_from_client_request(pckt *Pckt) {
-	// Decode the Body of the TXP Packet
-	pcktvoterequest, err := DeserializeVoteRequest(pckt.Body)
-	if err != nil {
-		log.Printf("Couldn't Deserialize Vote Request\n")
-		return
-	}
+func (manager *referendum_manager) create_referendum_from_client_request(pckt *PcktVoteRequest) {
 
 	// Check for duplicate VoteIDs in host_referendum map
-	if _, exists := manager.h_referendums[pcktvoterequest.VoteID]; exists {
+	if _, exists := manager.h_referendums[pckt.VoteID]; exists {
 		log.Printf("Duplicate Vote ID detected\n")
 	}
 
 	// Create a Referendum Object that this Node (server) is hosting
 	manager.h_referendums_lock.Lock()
-	manager.h_referendums[pcktvoterequest.VoteID] = manager.newHostReferendum(pcktvoterequest)
-	manager.h_referendums[pcktvoterequest.VoteID].copyConversationsMap()
+	defer manager.h_referendums_lock.Unlock()
+
+	manager.h_referendums[pckt.VoteID] = manager.newHostReferendum(pckt)
+	manager.h_referendums[pckt.VoteID].copyConversationsMap()
 
 	// Broadcast Referendum Question to clients
-	manager.broadcast_referendum_to_participants(manager.h_referendums[pcktvoterequest.VoteID])
-
-	manager.h_referendums_lock.Unlock()
+	manager.broadcast_referendum_to_participants(manager.h_referendums[pckt.VoteID])
 }
 
 // Used by the Packet Processor when the PcktVoteRequest packet comes in, once the Host Referendum has been set up
 func (manager *referendum_manager) broadcast_referendum_to_participants(voteRef *host_referendum) {
-	// Go to each participant's conversation object and send them the Question
+	// Check requirements to cast a vote
 
-	manager.h_referendums_lock.Lock()
+	// Go to each participant's conversation object and send them the Question
 
 }
 

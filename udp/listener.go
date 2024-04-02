@@ -88,7 +88,7 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 	if !exists {
 		conversationRef = newConversation(packet.Header.ConvID, addr)
 		conversations[packet.Header.ConvID] = conversationRef
-		conversationRef.startConversation()
+		go conversationRef.looper()
 	}
 	conversations_lock.Unlock()
 
