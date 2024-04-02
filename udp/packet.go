@@ -7,37 +7,35 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"time"
 )
 
 // Low Level Packet, with reliable data transfer features for UDP
 
-// Total Header size is 20 Bytes
+// Total Header size is 24 Bytes
 type PcktHeader struct {
 	Magic       uint32 // 4 bytes, used for critical situations
 	Checksum    uint32 // 4 bytes CRC32 IEEE
 	ConvID      uint32 // 4 bytes
+	PacketNum   uint32 // 4 bytes
 	SequenceNum uint32 // 4 bytes
 	IsFinal     uint16 // 2 bytes
 	Type        uint16 // 2 bytes
 }
 
-// Types
-// const (
-// 	Data = 0
-// 	// ACK  = 1
-// 	// NACK = 2
-// )
-
 type Pckt struct {
-	Header         PcktHeader // 20 bytes
-	Body           []byte     // N bytes
-	MissingPackets []uint32
+	Header PcktHeader // 24 bytes
+	Body   []byte     // N bytes
 
-	// 20 + N <= 256 Bytes
+	// Used with Selective Repeat, not actually sent
+	AckReceived bool      // Indicates if ACK has been received for the packet
+	LastSent    time.Time // The last time the packet was sent
+
+	// 24 + N <= 256 Bytes ideally
 }
 
 // SerializePacket serializes the entire packet including its header and body.
-func SerializePacket(packet Pckt) ([]byte, error) {
+func SerializePacket(packet *Pckt) ([]byte, error) {
 	headerBytes, err := SerializeHeader(packet.Header)
 	if err != nil {
 		return nil, err
@@ -47,14 +45,14 @@ func SerializePacket(packet Pckt) ([]byte, error) {
 
 // DeserializePacket deserializes the entire packet from bytes.
 func DeserializePacket(data []byte) (*Pckt, error) {
-	if len(data) < 20 { // Assuming header is 20 bytes
+	if len(data) < 24 { // Assuming header is 24 bytes
 		return nil, errors.New("packet too short")
 	}
-	header, err := DeserializeHeader(data[:20])
+	header, err := DeserializeHeader(data[:24])
 	if err != nil {
 		return nil, err
 	}
-	return &Pckt{Header: *header, Body: data[20:]}, nil
+	return &Pckt{Header: *header, Body: data[24:]}, nil
 }
 
 // SerializeHeader serializes the packet header into bytes.
@@ -68,6 +66,9 @@ func SerializeHeader(pcktheader PcktHeader) ([]byte, error) {
 		return nil, err
 	}
 	if err := binary.Write(buf, binary.BigEndian, pcktheader.ConvID); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.BigEndian, pcktheader.PacketNum); err != nil {
 		return nil, err
 	}
 	if err := binary.Write(buf, binary.BigEndian, pcktheader.SequenceNum); err != nil {
@@ -95,6 +96,9 @@ func DeserializeHeader(data []byte) (*PcktHeader, error) {
 		return nil, err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &header.ConvID); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.PacketNum); err != nil {
 		return nil, err
 	}
 	if err := binary.Read(buf, binary.BigEndian, &header.SequenceNum); err != nil {
@@ -131,12 +135,12 @@ func ByteSliceEqual(a []byte, b []byte) bool {
 // Used both to generate checksums for outgoing packets, and verify checksums for incoming packets
 func ComputeChecksum(raw_packet []byte) ([]byte, error) {
 	// Check raw_packet is the right size
-	if len(raw_packet) < 20 {
+	if len(raw_packet) < 24 {
 		return nil, errors.New("ComputeChecksum: Too few bytes in argument: raw_packet")
 	}
 
-	// Compute CRC32 IEEE Checksum from ConvID to Type Fields
-	CHECKSUM := crc32.ChecksumIEEE(raw_packet[8:20])
+	// Compute CRC32 IEEE Checksum from ConvID to the end of the packet
+	CHECKSUM := crc32.ChecksumIEEE(raw_packet[8:])
 
 	buf := new(bytes.Buffer)
 
@@ -152,7 +156,7 @@ func ComputeChecksum(raw_packet []byte) ([]byte, error) {
 // Used to verify checkums for incoming packets, returns true if all checks out
 func VerifyChecksum(raw_packet []byte) (bool, error) {
 	// Check raw_packet is the right size
-	if len(raw_packet) < 20 {
+	if len(raw_packet) < 24 {
 		return false, errors.New("VerifyChecksum: Too few bytes in argument: raw_packet")
 	}
 
@@ -168,7 +172,7 @@ func VerifyChecksum(raw_packet []byte) (bool, error) {
 // Used to verify the Magic field for incoming packets, returns true if all checks out
 func VerifyMagic(raw_packet []byte) (bool, error) {
 	// Check raw_packet is the right size
-	if len(raw_packet) < 20 {
+	if len(raw_packet) < 24 {
 		return false, errors.New("VerifyMagic: Too few bytes in argument: raw_packet")
 	}
 
@@ -178,7 +182,7 @@ func VerifyMagic(raw_packet []byte) (bool, error) {
 // Used to verify checksums and the Magic field for incoming packets, returns true if all checks out
 func VerifyPacket(raw_packet []byte) (bool, error) {
 	// Check raw_packet is the right size
-	if len(raw_packet) < 20 {
+	if len(raw_packet) < 24 {
 		return false, errors.New("VerifyPacket: Too few bytes in argument: raw_packet")
 	}
 

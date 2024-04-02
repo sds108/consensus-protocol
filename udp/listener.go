@@ -2,27 +2,15 @@ package main
 
 import (
 	//"fmt"
+
 	"log"
 	"net"
 )
 
-func listener(udpPort string) {
-	// Resolve UDP Address to listen at
-	addr, err := net.ResolveUDPAddr("udp", ":"+udpPort)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-	log.Printf("UDP server listening on port %s", udpPort)
-
+func listener() {
 	// Listen Continuously
-	for {
-		buffer := make([]byte, 4096)
+	for true {
+		buffer := make([]byte, 8192)
 		n, addr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			log.Println("Error reading from UDP:", err)
@@ -34,8 +22,9 @@ func listener(udpPort string) {
 }
 
 func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []byte) {
-	// Make sure Data is at least 20 Bytes
-	if len(raw_packet) < 20 {
+
+	// Make sure Data is at least 24 Bytes
+	if len(raw_packet) < 24 {
 		log.Printf("handleIncomingPackets: insufficient packet size\n")
 		return
 	}
@@ -59,17 +48,49 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 		return
 	}
 
+	// Check if Ping Request for Conversation ID Assignment
+	if packet.Header.Type == PING_REQ {
+		pingPckt := Pckt{
+			Header: PcktHeader{
+				Magic:       MAGIC_CONST,
+				Checksum:    0,
+				ConvID:      generateConversationID(),
+				PacketNum:   0,
+				SequenceNum: 0,
+				Type:        PING_RES,
+				IsFinal:     1,
+			},
+			Body: []byte{},
+		}
+
+		// Send Back Unique Conversation ID for the Client
+		sendUDP(addr, &pingPckt)
+		return
+	}
+
+	// Check Got Assigned a new Conversation ID
+	if packet.Header.Type == PING_RES {
+		if conversation_id_self == 0 {
+			conversation_id_self = packet.Header.ConvID
+		}
+
+		return // Drop packet, to not accidentally create a conversation with yourself
+	}
+
+	// Block incoming if haven't got a Conversation ID
+	if conversation_id_self == 0 {
+		return
+	}
+
 	conversations_lock.Lock()
+
 	conversationRef, exists := conversations[packet.Header.ConvID]
 	if !exists {
-		conversationRef = newConversation(packet.Header.ConvID)
+		conversationRef = newConversation(packet.Header.ConvID, addr)
 		conversations[packet.Header.ConvID] = conversationRef
+		conversationRef.startConversation()
 	}
 	conversations_lock.Unlock()
 
 	conversationRef.ARQ_Receive(conn, addr, *packet)
-}
-
-func main() {
-	listener("8080")
 }

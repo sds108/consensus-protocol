@@ -1,4 +1,4 @@
-module example.com/main/v2
+module core
 
 go 1.22.0
 
