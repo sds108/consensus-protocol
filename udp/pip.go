@@ -167,7 +167,7 @@ func SerializeVoteRequest(pcktvoterequest *PcktVoteRequest) ([]byte, error) {
 	}
 
 	// Store the Question String
-	if err := binary.Write(buf, binary.BigEndian, pcktvoterequest.Question); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, []byte(pcktvoterequest.Question)); err != nil {
 		return nil, err
 	}
 

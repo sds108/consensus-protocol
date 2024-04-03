@@ -68,6 +68,8 @@ var (
 	conversations        map[uint32]*conversation = make(map[uint32]*conversation)
 	generatedConvIDs     map[uint32]bool          = make(map[uint32]bool)
 	globalWaitGroup      sync.WaitGroup
+	ref_manager          *referendum_manager = newReferendumManager()
+	my_features          []uint16
 )
 
 func generateConversationID() uint32 {

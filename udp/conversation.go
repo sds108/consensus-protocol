@@ -8,6 +8,8 @@ import (
 	"net"
 	"sync" // Import the sync package for mutexes.
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Sliding Window Structure (holds packets waiting to be sent, and all other SR attributes)
@@ -45,6 +47,8 @@ type conversation struct {
 
 	// UDP Address of the Node Corresponding to this Conversation
 	conversation_addr *net.UDPAddr
+
+	conversation_features []uint16
 }
 
 // newConversation creates a new conversation instance
@@ -62,6 +66,12 @@ func newConversation(conversation_id uint32, conv_addr *net.UDPAddr) *conversati
 			windowSize:  5,
 			nextPcktNum: 0,
 		},
+	}
+}
+
+func (conv *conversation) updateConversationAddr(conv_addr *net.UDPAddr) {
+	if conv_addr != conv.conversation_addr {
+		conv.conversation_addr = conv_addr
 	}
 }
 
@@ -189,8 +199,8 @@ func (conv *conversation) sendHello() {
 	helloBody := PcktHello{
 		DataID:      hello_c2s,
 		Version:     0,
-		NumFeatures: 0,
-		Features:    []uint16{1, 1, 2, 3, 2, 1, 2, 1, 2, 3, 4, 1, 4, 4},
+		NumFeatures: uint16(len(my_features)),
+		Features:    my_features,
 	}
 
 	helloBody_bytes, err := SerializeHello(&helloBody)
@@ -228,12 +238,242 @@ func (conv *conversation) sendHello() {
 		// Increment next Packet Number
 		conv.sender.nextPcktNum += 1
 	}
-
 }
 
 // sendHelloBack sends a Hello Back Packet
 func (conv *conversation) sendHelloResonse() {
+	// Create the Hello Struct for the body of the Packet
+	helloBackBody := PcktHello{
+		DataID:      hello_back_s2c,
+		Version:     0,
+		NumFeatures: uint16(len(my_features)),
+		Features:    my_features,
+	}
 
+	helloBackBody_bytes, err := SerializeHello(&helloBackBody)
+	if err != nil {
+		return
+	}
+
+	// Lock outgoing
+	conv.sender.outgoing_lock.Lock()
+	defer conv.sender.outgoing_lock.Unlock()
+
+	helloBackPacket := Pckt{
+		Header: PcktHeader{
+			Magic:       MAGIC_CONST,
+			Checksum:    0,
+			ConvID:      conversation_id_self,
+			PacketNum:   conv.sender.nextPcktNum,
+			SequenceNum: 0,
+			Type:        DATA,
+			IsFinal:     1,
+		},
+		Body: make([]byte, 0),
+	}
+
+	helloBackPacket.Body = append(helloBackPacket.Body, helloBackBody_bytes...)
+
+	// Make Sure we're not exceeding Maximum Packet Size
+	if len(helloBackPacket.Body) > MAX_PCKT_SIZE {
+		// Drop this packet
+		return
+	} else {
+		// Append to outgoing
+		conv.sender.outgoing[helloBackPacket.Header.PacketNum] = &helloBackPacket
+
+		// Increment next Packet Number
+		conv.sender.nextPcktNum += 1
+	}
+}
+
+func (conv *conversation) sendVoteRequestToServer(question string) {
+	// Create the Vote Request Struct for the body of the Packet
+	voteid, err := uuid.NewUUID()
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	voteReqBody := PcktVoteRequest{
+		DataID:         vote_c2s_request_vote,
+		VoteID:         voteid,
+		QuestionLength: uint32(len(question)),
+		Question:       question,
+	}
+
+	voteReqBody_bytes, err := SerializeVoteRequest(&voteReqBody)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	// Lock outgoing
+	conv.sender.outgoing_lock.Lock()
+	defer conv.sender.outgoing_lock.Unlock()
+
+	voteReqPacket := Pckt{
+		Header: PcktHeader{
+			Magic:       MAGIC_CONST,
+			Checksum:    0,
+			ConvID:      conversation_id_self,
+			PacketNum:   conv.sender.nextPcktNum,
+			SequenceNum: 0,
+			Type:        DATA,
+			IsFinal:     1,
+		},
+		Body: make([]byte, 0),
+	}
+
+	voteReqPacket.Body = append(voteReqPacket.Body, voteReqBody_bytes...)
+
+	// Make Sure we're not exceeding Maximum Packet Size
+	if len(voteReqPacket.Body) > MAX_PCKT_SIZE {
+		// Drop this packet
+		return
+	} else {
+		// Append to outgoing
+		conv.sender.outgoing[voteReqPacket.Header.PacketNum] = &voteReqPacket
+
+		// Increment next Packet Number
+		conv.sender.nextPcktNum += 1
+	}
+}
+
+func (conv *conversation) sendVoteBroadcastToClient(h_ref *host_referendum) {
+	// Create the Vote Broadcast Struct for the body of the Packet
+	voteBrBody := PcktVoteRequest{
+		DataID:         vote_s2c_broadcast_question,
+		VoteID:         h_ref.VoteID,
+		QuestionLength: uint32(len(h_ref.Question)),
+		Question:       h_ref.Question,
+	}
+
+	voteBrBody_bytes, err := SerializeVoteRequest(&voteBrBody)
+	if err != nil {
+		return
+	}
+
+	// Lock outgoing
+	conv.sender.outgoing_lock.Lock()
+	defer conv.sender.outgoing_lock.Unlock()
+
+	voteBrPacket := Pckt{
+		Header: PcktHeader{
+			Magic:       MAGIC_CONST,
+			Checksum:    0,
+			ConvID:      conversation_id_self,
+			PacketNum:   conv.sender.nextPcktNum,
+			SequenceNum: 0,
+			Type:        DATA,
+			IsFinal:     1,
+		},
+		Body: make([]byte, 0),
+	}
+
+	voteBrPacket.Body = append(voteBrPacket.Body, voteBrBody_bytes...)
+
+	// Make Sure we're not exceeding Maximum Packet Size
+	if len(voteBrPacket.Body) > MAX_PCKT_SIZE {
+		// Drop this packet
+		return
+	} else {
+		// Append to outgoing
+		conv.sender.outgoing[voteBrPacket.Header.PacketNum] = &voteBrPacket
+
+		// Increment next Packet Number
+		conv.sender.nextPcktNum += 1
+	}
+}
+
+func (conv *conversation) sendResponseToServer(c_ref *client_referendum) {
+	// Create the Vote Broadcast Struct for the body of the Packet
+	voteResBody := PcktVoteResponse{
+		DataID:   vote_c2s_response_to_question,
+		VoteID:   c_ref.VoteID,
+		Response: c_ref.result,
+	}
+
+	voteResBody_bytes, err := SerializeVoteResponse(&voteResBody)
+	if err != nil {
+		return
+	}
+
+	// Lock outgoing
+	conv.sender.outgoing_lock.Lock()
+	defer conv.sender.outgoing_lock.Unlock()
+
+	voteResPacket := Pckt{
+		Header: PcktHeader{
+			Magic:       MAGIC_CONST,
+			Checksum:    0,
+			ConvID:      conversation_id_self,
+			PacketNum:   conv.sender.nextPcktNum,
+			SequenceNum: 0,
+			Type:        DATA,
+			IsFinal:     1,
+		},
+		Body: make([]byte, 0),
+	}
+
+	voteResPacket.Body = append(voteResPacket.Body, voteResBody_bytes...)
+
+	// Make Sure we're not exceeding Maximum Packet Size
+	if len(voteResPacket.Body) > MAX_PCKT_SIZE {
+		// Drop this packet
+		return
+	} else {
+		// Append to outgoing
+		conv.sender.outgoing[voteResPacket.Header.PacketNum] = &voteResPacket
+
+		// Increment next Packet Number
+		conv.sender.nextPcktNum += 1
+	}
+}
+
+func (conv *conversation) sendResultBroadcastToClient(h_ref *host_referendum) {
+	// Create the Vote Broadcast Struct for the body of the Packet
+	voteResBrBody := PcktVoteResponse{
+		DataID:   vote_s2c_broadcast_result,
+		VoteID:   h_ref.VoteID,
+		Response: h_ref.result,
+	}
+
+	voteResBrBody_bytes, err := SerializeVoteResponse(&voteResBrBody)
+	if err != nil {
+		return
+	}
+
+	// Lock outgoing
+	conv.sender.outgoing_lock.Lock()
+	defer conv.sender.outgoing_lock.Unlock()
+
+	voteResBrPacket := Pckt{
+		Header: PcktHeader{
+			Magic:       MAGIC_CONST,
+			Checksum:    0,
+			ConvID:      conversation_id_self,
+			PacketNum:   conv.sender.nextPcktNum,
+			SequenceNum: 0,
+			Type:        DATA,
+			IsFinal:     1,
+		},
+		Body: make([]byte, 0),
+	}
+
+	voteResBrPacket.Body = append(voteResBrPacket.Body, voteResBrBody_bytes...)
+
+	// Make Sure we're not exceeding Maximum Packet Size
+	if len(voteResBrPacket.Body) > MAX_PCKT_SIZE {
+		// Drop this packet
+		return
+	} else {
+		// Append to outgoing
+		conv.sender.outgoing[voteResBrPacket.Header.PacketNum] = &voteResBrPacket
+
+		// Increment next Packet Number
+		conv.sender.nextPcktNum += 1
+	}
 }
 
 // sendSYN sends a SYN
@@ -450,28 +690,26 @@ func (conv *conversation) incomingProcessor() {
 					return
 				}
 
-				fmt.Println(hello.Version)
+				conv.conversation_features = hello.Features
 
 				// Send a Hello Back
-				conv.sendHello()
+				conv.sendHelloResonse()
 
 			}
 
 		case hello_back_s2c:
 			{
 				log.Printf("Got a hello back\n")
-				hello_back, err := DeserializeHello(conv.receiver.incoming[minPcktNum].Body)
+				hello_response, err := DeserializeHello(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
-					log.Printf("Could't Deserialize Hello Back Packet")
+					log.Printf("Could't Deserialize Hello Response Packet")
 					return
 				}
 
-				// Print for testing
-				fmt.Printf("\nClient's Features...\n")
-				fmt.Print(hello_back.Features, "\n\n")
+				conv.conversation_features = hello_response.Features
 
-				// Do nothing
-				conv.sendHello()
+				// Try send request
+				conv.sendVoteRequestToServer("2+2==5")
 			}
 
 		case vote_c2s_request_vote:
@@ -485,6 +723,7 @@ func (conv *conversation) incomingProcessor() {
 				fmt.Print(vote_request.Question)
 
 				// As Server, Begin a vote
+				ref_manager.create_referendum_from_client_request(vote_request)
 			}
 
 		case vote_s2c_broadcast_question:
@@ -498,6 +737,7 @@ func (conv *conversation) incomingProcessor() {
 				fmt.Print(vote_broadcast_question.Question)
 
 				// As a Client, Process Question and send your response back to server
+				ref_manager.handle_new_question_from_server(vote_broadcast_question, conv)
 			}
 
 		case vote_c2s_response_to_question:
@@ -511,6 +751,7 @@ func (conv *conversation) incomingProcessor() {
 				fmt.Print(vote_response.Response)
 
 				// As Server, log Client response
+				ref_manager.handle_response_from_client(vote_response, conv)
 			}
 
 		case vote_s2c_broadcast_result:
@@ -524,6 +765,7 @@ func (conv *conversation) incomingProcessor() {
 				fmt.Print(vote_broadcast_result.Response)
 
 				// As Client, overwrite your own response to the Question if you got it wrong
+				ref_manager.handle_result_from_server(vote_broadcast_result)
 			}
 
 		default:
