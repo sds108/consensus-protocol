@@ -3,62 +3,53 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
+	"net"
 	"os"
 	"strings"
-
-	//"github.com/google/uuid"
+	"time"
 )
 
-// Assuming DataHeader is an existing type; using a placeholder struct for demonstration.
-// type DataHeader struct{}
+func Startup() {
+	reader := bufio.NewReader(os.Stdin)
 
-// Placeholder struct based on the provided constructor.
-// type PcktHello struct {
-// 	Header      DataHeader
-// 	Version     uint32
-// 	NumFeatures uint16
-// 	Feature     []uint16
-// }
+	for serverAddr == nil {
+		fmt.Print("Please enter the server ip: ")
+		input, err := reader.ReadString('\n')
 
-// Assuming a placeholder struct based on the provided constructor.
-// type PcktVoteRequest struct {
-// 	Header         DataHeader
-// 	VoteID         uuid.UUID
-// 	QuestionLength uint32
-// 	Question       string
-// }
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+			continue
+		}
 
-// func NewPcktHello(version uint32, features []uint16) *PcktHello {
-// 	return &PcktHello{
-// 		Header:      DataHeader{},
-// 		Version:     version,
-// 		NumFeatures: uint16(len(features)),
-// 		Feature:     features,
-// 	}
-// }
+		input = strings.TrimSpace(input)
 
-// func NewPcktVoteRequest(QuestionLength uint32, Question string) *PcktVoteRequest {
-// 	return &PcktVoteRequest{
-// 		Header:         DataHeader{},
-// 		VoteID:         uuid.New(), // Generate a new UUID
-// 		QuestionLength: QuestionLength,
-// 		Question:       Question,
-// 	}
-// }
-
-
-func main() {
-	Brainloop()
+		// Resolve UDP Server Address to contact
+		serverAddr, err = net.ResolveUDPAddr("udp", input+":"+SERVER_PORT_CONST)
+		if err != nil {
+			log.Fatalf("Failed to resolve server address: %v", err)
+			continue
+		}
+	}
 }
+
+// func main() {
+// 	Brainloop()
+// }
 
 func Brainloop() {
-	ReadInput()
+
+	for true {
+		time.Sleep(5 * time.Second)
+		ReadInput()
+	}
 }
-//function for reading in the initial strings
+
+// function for reading in the initial strings
 func ReadInput() {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Welcome\nWhat would you like to do?\nHere is a list of commands: \n ")
-	fmt.Print("'request vote' \n 'number of clients' \n 'ip of clients' \n 'send with loss' \n")
+	fmt.Print("'request vote' \n 'number of clients' \n 'ip of clients' \n 'send with loss' \n 'disconnect' \n")
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("Error reading input:", err)
@@ -68,33 +59,36 @@ func ReadInput() {
 	input = strings.TrimSpace(input)
 	requestHandler(input)
 }
-//function entered if a vote request is initiated
-func request_vote_initiator(){
-	fmt.Print("Please input vote request, 'return' to go back or 'quit' to exit: ")
 
-		reader := bufio.NewReader(os.Stdin)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println("Error reading input:", err)
-			return
-		}
-		input = strings.TrimSpace(input)
-		if input == "return"{
-			ReadInput()
-		}
+// function entered if a vote request is initiated
+func request_vote_initiator() {
+	fmt.Print("Please input vote request, 'return' to go back or 'disconnect' to exit: ")
 
-		if input == "quit" {
-			return
-		} else {
-			fmt.Print("You have chosen to start a vote request.\nProcessing...\n")
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Println("Error reading input:", err)
+		return
+	}
+	input = strings.TrimSpace(input)
+	if input == "return" {
+		ReadInput()
+	}
 
-			//--------------------------------------------------
-			// Make new vote request with input and send
-			//--------------------------------------------------
+	if input == "disconnect" {
+		request_disconnect()
+
+	} else {
+		fmt.Print("You have chosen to start a vote request.\nProcessing...\n")
+		for _, server := range conversations {
+			server.sendVoteRequestToServer(input)
+			break
 		}
+	}
 }
-//function entered if a request for client number on network is initiated
-func request_client_number(){
+
+// function entered if a request for client number on network is initiated
+func request_client_number() {
 	fmt.Print("You have chosen to request for number of clients on the network.\nProcessing...\n")
 
 	//--------------------------------------------------
@@ -103,7 +97,7 @@ func request_client_number(){
 
 }
 
-func request_client_ips(){
+func request_client_ips() {
 	fmt.Print("You have chosen to request for the ip addresses of the clients on the network.\nProcessing...\n")
 
 	//--------------------------------------------------
@@ -111,30 +105,59 @@ func request_client_ips(){
 	//--------------------------------------------------
 
 }
-//function for demonstrating SR maybe the send with loss function?
-func request_send_with_loss(){
+
+// function for demonstrating SR maybe the send with loss function?
+func request_send_with_loss() {
 	fmt.Print("You have chosen to request for sending packets with loss to the server.\nProcessing...\n")
 
 	//--------------------------------------------------
-	// Ken's send with loss function?
+	// change global boolean of send with loss
 	//--------------------------------------------------
 }
-//handler of inputs following initial input 
-func requestHandler(input string) {
 
+func request_send_without_loss() {
+	fmt.Print("You have chosen to request for sending packets without loss to the server.\nProcessing...\n")
+
+	//--------------------------------------------------
+	// change global boolean of send without loss
+	//--------------------------------------------------
+
+}
+
+func request_disconnect() {
+	fmt.Print("You have chosen to disconnect from the server.\n")
+
+	//--------------------------------------------------
+	// Send a message to disconnect client from server
+	//--------------------------------------------------
+	os.Exit(0)
+}
+
+// handler of inputs following initial input
+func requestHandler(input string) {
 
 	if input == "request vote" {
 		request_vote_initiator()
 	}
 
-	if input == "number of clients"{
+	if input == "number of clients" {
 		request_client_number()
 	}
-	if input == "ip of clients"{
+	if input == "ip of clients" {
 		request_client_ips()
 	}
-	
-	if input == "send with loss"{
+
+	if input == "send with loss" {
 		request_send_with_loss()
+	}
+
+	if input == "send without loss" {
+		request_send_without_loss()
+
+	}
+
+	if input == "disconnect" {
+		request_disconnect()
+
 	}
 }

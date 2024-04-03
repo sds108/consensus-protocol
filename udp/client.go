@@ -12,13 +12,10 @@ func main() {
 	// Rule I am client
 	i_am_server = false
 
-	// Resolve UDP Server Address to contact
-	serverAddr, err := net.ResolveUDPAddr("udp", "localhost:8080")
-	if err != nil {
-		log.Fatalf("Failed to resolve server address: %v", err)
-	}
+	Startup()
 
 	// Set up connection
+	var err error
 	conn, err = net.DialUDP("udp", nil, serverAddr)
 	if err != nil {
 		log.Fatalf("Failed to dial UDP server: %v", err)
@@ -79,4 +76,6 @@ func client_connect(serverAddr *net.UDPAddr) {
 
 		time.Sleep(time.Second)
 	}
+
+	go Brainloop()
 }

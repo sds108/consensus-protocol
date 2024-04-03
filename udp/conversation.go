@@ -81,7 +81,7 @@ func (conv *conversation) looper() {
 		conv.incomingProcessor()
 		conv.sendWindowPackets()
 		conv.checkForRetransmissions()
-		time.Sleep(3 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 	}
 }
 
@@ -707,10 +707,6 @@ func (conv *conversation) incomingProcessor() {
 				}
 
 				conv.conversation_features = hello_response.Features
-
-				// Try send request
-				time.Sleep(10 * time.Second)
-				conv.sendVoteRequestToServer("2+2==5=1")
 			}
 
 		case vote_c2s_request_vote:

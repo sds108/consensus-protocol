@@ -62,6 +62,7 @@ const SERVER_PORT_CONST = "8080"
 // Global Objects
 var (
 	i_am_server          bool
+	serverAddr           *net.UDPAddr
 	conn                 *net.UDPConn
 	conversation_id_self uint32 = 0
 	conversations_lock   sync.Mutex
