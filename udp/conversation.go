@@ -49,6 +49,8 @@ type conversation struct {
 	conversation_addr *net.UDPAddr
 
 	conversation_features []uint16
+
+	LastOnline time.Time
 }
 
 // newConversation creates a new conversation instance
@@ -66,6 +68,7 @@ func newConversation(conversation_id uint32, conv_addr *net.UDPAddr) *conversati
 			windowSize:  5,
 			nextPcktNum: 0,
 		},
+		LastOnline: time.Now(),
 	}
 }
 
@@ -87,7 +90,9 @@ func (conv *conversation) looper() {
 
 // ARQ_Receive handles incoming packets, checks for duplicates, and sends ACKs/NAKs, updates receivedPackets
 func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt Pckt) {
-	//fmt.Printf("Received packet: ConversationId=%d, PacketNumber=%d, SequenceNumber=%d, Data=%s, IsFinal=%t\n", pckt.Header.ConvID, pckt.Header.SequenceNum, pckt.Header.SequenceNum, string(pckt.Body), pckt.Header.IsFinal != 0)
+
+	// Update last online
+	conv.LastOnline = time.Now()
 
 	switch pckt.Header.Type {
 	case DATA:
@@ -109,7 +114,6 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 
 			// Check if duplicate
 			if _, exists := conv.receiver.incoming[pckt.Header.PacketNum]; !exists {
-				//fmt.Println(pckt)
 				conv.receiver.incoming[pckt.Header.PacketNum] = &pckt
 				conv.receiver.lastPcktReceived = pckt.Header.PacketNum
 			} else {
@@ -181,14 +185,11 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 	case SYN_ACK:
 		{
 			fmt.Printf("Got a SYN ACK\n")
-			// Do nothing for now
-			conv.sendHello()
 		}
 
 	default:
 		{
 			fmt.Printf("Received an Unknown Packet Type\n")
-			return // Drop packet
 		}
 	}
 }
@@ -562,8 +563,6 @@ func (conv *conversation) sendPacket(pckt *Pckt) error {
 		// Reset Last Sent Timestamp
 		pckt.LastSent = time.Now()
 	}
-
-	//log.Printf("Packet sent: ConversationId=%d, SequenceNumber=%d, Type=%d, IsFinal=%t\n", conv.conversation_id, seqNum, packetType, uint16ToBool(packet.Header.IsFinal))
 
 	return nil
 }
