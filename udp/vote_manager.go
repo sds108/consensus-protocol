@@ -158,15 +158,22 @@ func (manager *referendum_manager) computeQuestion(question string) uint16 {
 	if err != nil {
 		log.Println("Error running question: ", err)
 		response = SYNTAX_ERROR
-	}
-
-	if compute.(bool) {
-		response = SAT
 	} else {
-		response = UNSAT
-	}
+		if compute.(bool) {
+			response = SAT
+		} else {
+			response = UNSAT
+		}
 
-	response *= uint16(rand.Intn(1))
+		// Flip the value by chance
+		if rand.Intn(2) == 1 {
+			if response == SAT {
+				response = UNSAT
+			} else if response == UNSAT {
+				response = SAT
+			}
+		}
+	}
 
 	fmt.Println("Computed Response: ", response)
 
