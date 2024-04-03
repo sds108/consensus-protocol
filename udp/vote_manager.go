@@ -4,7 +4,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"math/rand"
 	"sync"
 
 	"github.com/expr-lang/expr"
@@ -40,8 +39,19 @@ type host_referendum struct {
 func (h_referendum *host_referendum) copyConversationsMap() {
 	conversations_lock.Lock()
 	h_referendum.referendum_lock.Lock()
+	var foundFeature bool
 	for key, conversation_ref := range conversations {
-		h_referendum.participants[key] = conversation_ref
+		foundFeature = false
+		for i := uint32(0); i < uint32(len(conversation_ref.conversation_features)); i++ {
+			if conversation_ref.conversation_features[i] == simple_eval {
+				foundFeature = true
+				break
+			}
+		}
+
+		if foundFeature {
+			h_referendum.participants[key] = conversation_ref
+		}
 	}
 	h_referendum.referendum_lock.Unlock()
 	conversations_lock.Unlock()
@@ -106,7 +116,9 @@ func (manager *referendum_manager) create_referendum_from_client_request(pckt *P
 
 	// Check for duplicate VoteIDs in host_referendum map
 	if _, exists := manager.h_referendums[pckt.VoteID]; exists {
-		log.Printf("Duplicate Vote ID detected\n")
+		if debug_mode {
+			log.Printf("Duplicate Vote ID detected\n")
+		}
 	}
 
 	// Create a Referendum Object that this Node (server) is hosting
@@ -121,13 +133,14 @@ func (manager *referendum_manager) create_referendum_from_client_request(pckt *P
 
 // Used by the Packet Processor when the PcktVoteBroadcast packet comes in on a client
 func (manager *referendum_manager) handle_new_question_from_server(pckt *PcktVoteRequest, asker *conversation) {
-	fmt.Println("got here 1")
 	manager.c_referendums_lock.Lock()
 	defer manager.c_referendums_lock.Unlock()
 
 	// Check for duplicate VoteIDs in host_referendum map
 	if _, exists := manager.c_referendums[pckt.VoteID]; exists {
-		log.Printf("Duplicate Vote ID detected\n")
+		if debug_mode {
+			log.Printf("Duplicate Vote ID detected\n")
+		}
 	}
 
 	// Create a Referendum Object that this Node (server) is hosting
@@ -150,13 +163,18 @@ func (manager *referendum_manager) computeQuestion(question string) uint16 {
 	// use evaluate function to return result
 	program, err := expr.Compile(question, expr.AsBool())
 	if err != nil {
-		log.Println("Error compiling question: ", err)
+		if debug_mode {
+			log.Println("Error compiling question: ", err)
+		}
+
 		response = SYNTAX_ERROR
 	}
 
 	compute, err := expr.Run(program, nil)
 	if err != nil {
-		log.Println("Error running question: ", err)
+		if debug_mode {
+			log.Println("Error running question: ", err)
+		}
 		response = SYNTAX_ERROR
 	} else {
 		if compute.(bool) {
@@ -166,16 +184,18 @@ func (manager *referendum_manager) computeQuestion(question string) uint16 {
 		}
 
 		// Flip the value by chance
-		if rand.Intn(2) == 1 {
-			if response == SAT {
-				response = UNSAT
-			} else if response == UNSAT {
-				response = SAT
-			}
-		}
+		// if rand.Intn(2) == 1 {
+		// 	if response == SAT {
+		// 		response = UNSAT
+		// 	} else if response == UNSAT {
+		// 		response = SAT
+		// 	}
+		// }
 	}
 
-	fmt.Println("Computed Response: ", response)
+	if debug_mode {
+		fmt.Println("Computed Response: ", response)
+	}
 
 	return response
 }
@@ -186,7 +206,9 @@ func (manager *referendum_manager) handle_response_from_client(pckt *PcktVoteRes
 
 	// Check if referendum exists
 	if _, exists := manager.h_referendums[pckt.VoteID]; !exists {
-		log.Printf("Referendum doesn't exist\n")
+		if debug_mode {
+			log.Printf("Referendum doesn't exist\n")
+		}
 		return
 	}
 
@@ -196,25 +218,33 @@ func (manager *referendum_manager) handle_response_from_client(pckt *PcktVoteRes
 
 	// Check if referendum is still going
 	if manager.h_referendums[pckt.VoteID].ongoing == false {
-		log.Printf("Referendum is over\n")
+		if debug_mode {
+			log.Printf("Referendum is over\n")
+		}
 		return
 	}
 
 	// check if responder (client voting) is not nil
 	if responder == nil {
-		log.Printf("Responder doesn't exist\n")
+		if debug_mode {
+			log.Printf("Responder doesn't exist\n")
+		}
 		return
 	}
 
 	// Check if the responder can vote here
 	if _, exists := manager.h_referendums[pckt.VoteID].participants[responder.conversation_id]; !exists {
-		log.Printf("Responder is not a legible participant in this vote\n")
+		if debug_mode {
+			log.Printf("Responder is not a legible participant in this vote\n")
+		}
 		return
 	}
 
 	// Check if the responder has already voted
 	if _, exists := manager.h_referendums[pckt.VoteID].who[responder.conversation_id]; exists {
-		log.Printf("Responder has already voted\n")
+		if debug_mode {
+			log.Printf("Responder has already voted\n")
+		}
 		return
 	}
 
@@ -245,9 +275,11 @@ func (manager *referendum_manager) broadcast_result_to_clients(voteRef *host_ref
 	}
 
 	if len(winners) == 0 {
-		fmt.Println("The referendum result cannot be called early")
+		if debug_mode {
+			fmt.Println("The referendum result cannot be called early")
+		}
 	} else if len(winners) > 0 {
-		fmt.Printf("Option %d has won the referendum\n", winners[0])
+		fmt.Printf("\nOption %d has won the referendum\n", winners[0])
 		// Go to each participant's conversation object and send them the Question
 		for _, participant := range voteRef.participants {
 			participant.sendResultBroadcastToClient(voteRef)
@@ -264,7 +296,9 @@ func (manager *referendum_manager) handle_result_from_server(pckt *PcktVoteRespo
 
 	// Check for VoteID in host_referendum map
 	if _, exists := manager.c_referendums[pckt.VoteID]; !exists {
-		log.Printf("Could not find referendum mentioned\n")
+		if debug_mode {
+			log.Printf("Could not find referendum mentioned\n")
+		}
 		return
 	}
 
@@ -274,10 +308,10 @@ func (manager *referendum_manager) handle_result_from_server(pckt *PcktVoteRespo
 
 	// Overwrite if necessary
 	if manager.c_referendums[pckt.VoteID].result != pckt.Response {
-		log.Printf("\nConsensus voted against us for Vote ID: %d, Question: %s.\n Our answer was %d, and the consensus answer was %d, overwriting now.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question, manager.c_referendums[pckt.VoteID].result, pckt.Response)
+		log.Printf("\n\nConsensus voted against us for Vote ID: %s, Question: %s.\nOur answer was %d, and the consensus answer was %d, overwriting now.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question, manager.c_referendums[pckt.VoteID].result, pckt.Response)
 		manager.c_referendums[pckt.VoteID].result = pckt.Response
 	} else {
-		log.Printf("\nConsensus agrees with us for Vote ID: %d, Question: %s.\n Our answer was %d, and the consensus answer was %d.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question, manager.c_referendums[pckt.VoteID].result, pckt.Response)
+		log.Printf("\n\nConsensus agrees with us for Vote ID: %s, Question: %s.\nOur answer was %d, and the consensus answer was %d.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question, manager.c_referendums[pckt.VoteID].result, pckt.Response)
 	}
 
 }

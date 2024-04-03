@@ -12,6 +12,11 @@ func main() {
 	// Rule I am client
 	i_am_server = false
 
+	my_features = make([]uint16, 1)
+	my_features[0] = 1
+	loss_constant = 0
+	debug_mode = false
+
 	Startup()
 
 	// Set up connection
@@ -20,9 +25,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to dial UDP server: %v", err)
 	}
-
-	log.Println("My name is ", conn.RemoteAddr())
-	log.Println("My name is ", conn.LocalAddr())
 
 	// Start Listener Thread
 	globalWaitGroup := new(sync.WaitGroup)

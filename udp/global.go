@@ -44,8 +44,8 @@ const (
 
 // Features
 const (
-	voting        uint16 = 0
-	file_transfer uint16 = 1
+	none        uint16 = 0
+	simple_eval uint16 = 1
 )
 
 const MAGIC_CONST = 0x01051117
@@ -62,6 +62,8 @@ const SERVER_PORT_CONST = "8080"
 // Global Objects
 var (
 	i_am_server          bool
+	debug_mode           bool
+	loss_constant        float64
 	serverAddr           *net.UDPAddr
 	conn                 *net.UDPConn
 	conversation_id_self uint32 = 0
@@ -95,14 +97,18 @@ func sendUDP(addr *net.UDPAddr, pckt *Pckt) error {
 	// Serialize Packet
 	pckt_bytes, err := SerializePacket(pckt)
 	if err != nil {
-		log.Printf("Error Serializing Packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+		if debug_mode {
+			log.Printf("Error Serializing Packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+		}
 		return err
 	}
 
 	// Generate Checksum
 	checksum_bytes, err := ComputeChecksum(pckt_bytes)
 	if err != nil {
-		log.Printf("Error generating checksum for Packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+		if debug_mode {
+			log.Printf("Error generating checksum for Packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+		}
 		return err
 	}
 
@@ -112,12 +118,16 @@ func sendUDP(addr *net.UDPAddr, pckt *Pckt) error {
 	// Send it off over UDP
 	if i_am_server {
 		if _, err := conn.WriteTo(pckt_bytes, addr); err != nil {
-			log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+			if debug_mode {
+				log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+			}
 			return err
 		}
 	} else {
 		if _, err := conn.Write(pckt_bytes); err != nil {
-			log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+			if debug_mode {
+				log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+			}
 			return err
 		}
 	}

@@ -13,12 +13,14 @@ func main() {
 	// Generate a Conversation ID for self if necessary
 	conversation_id_self = generateConversationID()
 
-	// Set up Server Port
-	udpPort := "8080"
+	my_features = make([]uint16, 1)
+	my_features[0] = 1
+	loss_constant = 0
 	i_am_server = true
+	debug_mode = true
 
 	// Resolve UDP Address to listen at
-	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:"+udpPort)
+	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:"+SERVER_PORT_CONST)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,14 +31,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("UDP server listening on port %s", udpPort)
-	log.Println("My name is ", conn.RemoteAddr())
-	log.Println("My name is ", conn.LocalAddr())
+	log.Printf("UDP server listening on port %s", SERVER_PORT_CONST)
+	log.Println("My remote address is ", conn.RemoteAddr())
+	log.Println("My local address is ", conn.LocalAddr())
 
 	// Start Listener Thread
 	globalWaitGroup := new(sync.WaitGroup)
 	globalWaitGroup.Add(1)
-	listener()
+	go listener()
 
 	// Wait for waitgroup to finish
 	globalWaitGroup.Wait()

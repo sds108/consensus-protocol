@@ -25,26 +25,34 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 
 	// Make sure Data is at least 24 Bytes
 	if len(raw_packet) < 24 {
-		log.Printf("handleIncomingPackets: insufficient packet size\n")
+		if debug_mode {
+			log.Printf("handleIncomingPackets: insufficient packet size\n")
+		}
 		return
 	}
 
 	// Magic and Checksum check, if this fails, you would drop the packet
 	verify_packet, err := VerifyPacket(raw_packet)
 	if err != nil {
-		log.Printf("handleIncomingPackets: VerifyPacket returned Error\n")
+		if debug_mode {
+			log.Printf("handleIncomingPackets: VerifyPacket returned Error\n")
+		}
 		return
 	}
 
 	if !verify_packet {
-		log.Printf("handleIncomingPackets: VerifyPacket returned False\n")
+		if debug_mode {
+			log.Printf("handleIncomingPackets: VerifyPacket returned False\n")
+		}
 		return
 	}
 
 	// Deserialize the Header
 	packet, err := DeserializePacket(raw_packet)
 	if err != nil {
-		log.Printf("handleIncomingPackets: DeserializeHeader returned Error\n")
+		if debug_mode {
+			log.Printf("handleIncomingPackets: DeserializeHeader returned Error\n")
+		}
 		return
 	}
 
@@ -88,7 +96,7 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 	if !exists {
 		conversationRef = newConversation(packet.Header.ConvID, addr)
 		conversations[packet.Header.ConvID] = conversationRef
-		go conversationRef.looper()
+		conversationRef.startUp()
 	}
 	conversations_lock.Unlock()
 

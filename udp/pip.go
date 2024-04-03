@@ -99,7 +99,7 @@ func SerializeHello(pckthello *PcktHello) ([]byte, error) {
 	}
 
 	// Store Actual Length of the Features Slice
-	if err := binary.Write(buf, binary.BigEndian, uint32(len(pckthello.Features))); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, uint16(len(pckthello.Features))); err != nil {
 		return nil, err
 	}
 

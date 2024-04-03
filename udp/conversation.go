@@ -3,7 +3,6 @@ package main // Declares that this file is part of the main package.
 import (
 	// Import the fmt package for printing.
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"sync" // Import the sync package for mutexes.
@@ -78,6 +77,12 @@ func (conv *conversation) updateConversationAddr(conv_addr *net.UDPAddr) {
 	}
 }
 
+func (conv *conversation) startUp() {
+	go conv.looper()
+
+	conv.sendHello()
+}
+
 // startConversation starts all of the Routines associated with said conversation
 func (conv *conversation) looper() {
 	for true {
@@ -108,7 +113,9 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 			if pckt.Header.IsFinal == 0 || pckt.Header.SequenceNum > 0 {
 				// drop fragment packet
 				conv.receiver.lastPcktReceived = pckt.Header.PacketNum
-				fmt.Printf("Rejecting Multi Fragment Packet %d.\n", pckt.Header.PacketNum)
+				if debug_mode {
+					log.Printf("Rejecting Multi Fragment Packet %d.\n", pckt.Header.PacketNum)
+				}
 				return
 			}
 
@@ -117,7 +124,9 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 				conv.receiver.incoming[pckt.Header.PacketNum] = &pckt
 				conv.receiver.lastPcktReceived = pckt.Header.PacketNum
 			} else {
-				fmt.Printf("Duplicate packet received: %d.\n", pckt.Header.PacketNum)
+				if debug_mode {
+					log.Printf("Duplicate packet received: %d.\n", pckt.Header.PacketNum)
+				}
 			}
 
 			// Updates the highest sequence number if required
@@ -125,7 +134,9 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 				// check for gap
 				if pckt.Header.PacketNum > conv.receiver.lastPcktReceived+1 {
 					for i := conv.receiver.lastPcktReceived + 1; i < pckt.Header.PacketNum; i++ {
-						fmt.Printf("Packet %d: %d does not exist, sending NACK\n", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+						if debug_mode {
+							log.Printf("Packet %d: %d does not exist, sending NACK\n", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+						}
 						conv.sendNAK(i, 0)
 					}
 				}
@@ -135,7 +146,9 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 
 	case ACK:
 		{
-			fmt.Printf("Got an ACK for Packet %d.\n", pckt.Header.PacketNum)
+			if debug_mode {
+				log.Printf("Got an ACK for Packet %d.\n", pckt.Header.PacketNum)
+			}
 
 			// Lock Sender
 			conv.sender.outgoing_lock.Lock()
@@ -143,7 +156,9 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 
 			// Make sure outgoing packet exists
 			if _, exists := conv.sender.outgoing[pckt.Header.PacketNum]; !exists {
-				log.Printf("Packet %d does not exist, cannot Ack.", pckt.Header.PacketNum)
+				if debug_mode {
+					log.Printf("Packet %d does not exist, cannot Ack.", pckt.Header.PacketNum)
+				}
 				return // Drop Ack
 			}
 
@@ -153,7 +168,9 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 
 	case NAK:
 		{
-			fmt.Printf("Got a NACK for Packet %d.\n", pckt.Header.PacketNum)
+			if debug_mode {
+				log.Printf("Got a NACK for Packet %d.\n", pckt.Header.PacketNum)
+			}
 
 			// Lock Sender
 			conv.sender.outgoing_lock.Lock()
@@ -161,13 +178,17 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 
 			// Make sure outgoing packet exists
 			if _, exists := conv.sender.outgoing[pckt.Header.PacketNum]; !exists {
-				log.Printf("Packet %d does not exist, cannot resend for Nack.", pckt.Header.PacketNum)
+				if debug_mode {
+					log.Printf("Packet %d does not exist, cannot resend for Nack.", pckt.Header.PacketNum)
+				}
 				return // Drop Nack
 			}
 
 			// Make sure packet wasn't Acked before the lock
 			if conv.sender.outgoing[pckt.Header.PacketNum].AckReceived == true {
-				log.Printf("Packet %d already Acked, won't resend.", pckt.Header.PacketNum)
+				if debug_mode {
+					log.Printf("Packet %d already Acked, won't resend.", pckt.Header.PacketNum)
+				}
 				return // Drop Nack
 			}
 
@@ -177,19 +198,25 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 
 	case SYN:
 		{
-			fmt.Printf("Got a SYN\n")
+			if debug_mode {
+				log.Printf("Got a SYN\n")
+			}
 			// Instantly respond with SYN_ACK
 			conv.sendSYN_ACK()
 		}
 
 	case SYN_ACK:
 		{
-			fmt.Printf("Got a SYN ACK\n")
+			if debug_mode {
+				log.Printf("Got a SYN ACK\n")
+			}
 		}
 
 	default:
 		{
-			fmt.Printf("Received an Unknown Packet Type\n")
+			if debug_mode {
+				log.Printf("Received an Unknown Packet Type\n")
+			}
 		}
 	}
 }
@@ -467,6 +494,9 @@ func (conv *conversation) sendResultBroadcastToClient(h_ref *host_referendum) {
 	// Make Sure we're not exceeding Maximum Packet Size
 	if len(voteResBrPacket.Body) > MAX_PCKT_SIZE {
 		// Drop this packet
+		if debug_mode {
+			log.Println("\n\nExceeded Max Packet Size\n\n")
+		}
 		return
 	} else {
 		// Append to outgoing
@@ -583,7 +613,9 @@ func (conv *conversation) sendWindowPackets() {
 					conv.sendPacket(conv.sender.outgoing[i])
 				}
 			} else {
-				log.Printf("NULL pointer in window slice")
+				if debug_mode {
+					log.Printf("NULL pointer in window slice")
+				}
 			}
 		} else {
 			//log.Printf("Send Window Packets: Reached the end of the window")
@@ -614,7 +646,9 @@ func (conv *conversation) moveWindow() {
 					break
 				}
 			} else {
-				log.Printf("NULL pointer in outgoing.\n")
+				if debug_mode {
+					log.Printf("NULL pointer in outgoing.\n")
+				}
 			}
 		} else {
 			//log.Printf("Packet %d doesn't exist in outgoing.\n", i)
@@ -633,11 +667,15 @@ func (conv *conversation) checkForRetransmissions() {
 			if _, exists := conv.sender.outgoing[i]; exists {
 				if conv.sender.outgoing[i] != nil {
 					if !conv.sender.outgoing[i].AckReceived && time.Since(conv.sender.outgoing[i].LastSent) > 1000*time.Millisecond {
-						fmt.Println("Resending %d.\n", conv.sender.outgoing[i].Header.PacketNum)
+						if debug_mode {
+							log.Println("Resending %d.\n", conv.sender.outgoing[i].Header.PacketNum)
+						}
 						conv.sendPacket(conv.sender.outgoing[i])
 					}
 				} else {
-					log.Printf("NULL pointer in outgoing.\n")
+					if debug_mode {
+						log.Printf("NULL pointer in outgoing.\n")
+					}
 				}
 			} else {
 				//log.Printf("Packet %d doesn't exist in outgoing.\n", i)
@@ -665,7 +703,9 @@ func (conv *conversation) incomingProcessor() {
 
 		// Make sure it actually exists
 		if _, exists := conv.receiver.incoming[minPcktNum]; !exists {
-			log.Printf("Packet %d does not exist in incoming.", minPcktNum)
+			if debug_mode {
+				log.Printf("Packet %d does not exist in incoming.", minPcktNum)
+			}
 			return
 		} else {
 			// Delete Packet from incoming after we're done with it
@@ -675,17 +715,23 @@ func (conv *conversation) incomingProcessor() {
 		// Process the next packet
 		DataID, err := DeserializeDataID(conv.receiver.incoming[minPcktNum].Body[:2])
 		if err != nil {
-			log.Printf("Couldn't get Data ID")
+			if debug_mode {
+				log.Printf("Couldn't get Data ID")
+			}
 			return
 		}
 
 		switch DataID {
 		case hello_c2s:
 			{
-				log.Printf("Got a hello\n")
+				if debug_mode {
+					log.Printf("Got a hello\n")
+				}
 				hello, err := DeserializeHello(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
-					log.Printf("Could't Deserialize Hello Packet")
+					if debug_mode {
+						log.Printf("Could't Deserialize Hello Packet")
+					}
 					return
 				}
 
@@ -698,10 +744,14 @@ func (conv *conversation) incomingProcessor() {
 
 		case hello_back_s2c:
 			{
-				log.Printf("Got a hello back\n")
+				if debug_mode {
+					log.Printf("Got a hello back\n")
+				}
 				hello_response, err := DeserializeHello(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
-					log.Printf("Could't Deserialize Hello Response Packet")
+					if debug_mode {
+						log.Printf("Could't Deserialize Hello Response Packet")
+					}
 					return
 				}
 
@@ -710,13 +760,20 @@ func (conv *conversation) incomingProcessor() {
 
 		case vote_c2s_request_vote:
 			{
+				if debug_mode {
+					log.Printf("Got a Request to Host Referendum\n")
+				}
 				vote_request, err := DeserializeVoteRequest(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
-					log.Printf("Could't Deserialize Vote Request from Client Packet")
+					if debug_mode {
+						log.Printf("Could't Deserialize Vote Request from Client Packet")
+					}
 					return
 				}
 
-				fmt.Print(vote_request.Question)
+				if debug_mode {
+					log.Printf("Got Question from client: %d: \"%s\"", conv.receiver.incoming[minPcktNum], vote_request.Question)
+				}
 
 				// As Server, Begin a vote
 				ref_manager.create_referendum_from_client_request(vote_request)
@@ -724,13 +781,16 @@ func (conv *conversation) incomingProcessor() {
 
 		case vote_s2c_broadcast_question:
 			{
+				if debug_mode {
+					log.Printf("Got a Question to answer for the host\n")
+				}
 				vote_broadcast_question, err := DeserializeVoteRequest(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
-					log.Printf("Could't Deserialize Vote Broadcast Question from Server Packet")
+					if debug_mode {
+						log.Printf("Could't Deserialize Vote Broadcast Question from Server Packet")
+					}
 					return
 				}
-
-				fmt.Print(vote_broadcast_question.Question)
 
 				// As a Client, Process Question and send your response back to server
 				ref_manager.handle_new_question_from_server(vote_broadcast_question, conv)
@@ -738,13 +798,16 @@ func (conv *conversation) incomingProcessor() {
 
 		case vote_c2s_response_to_question:
 			{
+				if debug_mode {
+					log.Printf("Got a Response from a Voter\n")
+				}
 				vote_response, err := DeserializeVoteResponse(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
-					log.Printf("Could't Deserialize Vote Response from Client Packet")
+					if debug_mode {
+						log.Printf("Could't Deserialize Vote Response from Client Packet")
+					}
 					return
 				}
-
-				fmt.Print(vote_response.Response)
 
 				// As Server, log Client response
 				ref_manager.handle_response_from_client(vote_response, conv)
@@ -752,13 +815,16 @@ func (conv *conversation) incomingProcessor() {
 
 		case vote_s2c_broadcast_result:
 			{
+				if debug_mode {
+					log.Printf("Got a Winning Result for Referendum\n")
+				}
 				vote_broadcast_result, err := DeserializeVoteResponse(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
-					log.Printf("Could't Deserialize Vote Broadcast Result from Server Packet")
+					if debug_mode {
+						log.Printf("Could't Deserialize Vote Broadcast Result from Server Packet")
+					}
 					return
 				}
-
-				fmt.Print(vote_broadcast_result.Response)
 
 				// As Client, overwrite your own response to the Question if you got it wrong
 				ref_manager.handle_result_from_server(vote_broadcast_result)
@@ -766,7 +832,9 @@ func (conv *conversation) incomingProcessor() {
 
 		default:
 			{
-				log.Printf("Received an Unknown Data ID")
+				if debug_mode {
+					log.Printf("Received an Unknown Data ID")
+				}
 			}
 		}
 	}

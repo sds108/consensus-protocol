@@ -147,7 +147,7 @@ func ComputeChecksum(raw_packet []byte) ([]byte, error) {
 	err := binary.Write(buf, binary.BigEndian, CHECKSUM)
 	if err != nil {
 		fmt.Println(err)
-		return nil, errors.New("ComputeChecksum: Error converting CRC32 Checksum to bytes")
+		return nil, err
 	}
 
 	return buf.Bytes(), nil
@@ -162,8 +162,7 @@ func VerifyChecksum(raw_packet []byte) (bool, error) {
 
 	CHECKSUM_BYTES, err := ComputeChecksum(raw_packet)
 	if err != nil {
-		fmt.Println(err)
-		return false, errors.New("VerifyChecksum: ComputeChecksum returned Error")
+		return false, err
 	}
 
 	return ByteSliceEqual(CHECKSUM_BYTES, raw_packet[4:8]), nil

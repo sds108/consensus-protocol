@@ -38,7 +38,6 @@ func Startup() {
 // }
 
 func Brainloop() {
-
 	for true {
 		time.Sleep(5 * time.Second)
 		ReadInput()
