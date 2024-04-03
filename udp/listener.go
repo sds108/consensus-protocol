@@ -68,7 +68,7 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 		return
 	}
 
-	// Check Got Assigned a new Conversation ID
+	// Check if Got Assigned a new Conversation ID
 	if packet.Header.Type == PING_RES {
 		if conversation_id_self == 0 {
 			conversation_id_self = packet.Header.ConvID
