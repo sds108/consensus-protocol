@@ -15,7 +15,9 @@ func main() {
 
 	my_features = make([]uint16, 1)
 	my_features[0] = 1
-	loss_constant = 0
+	loss_constant = 0.2
+	defect_constant = 0
+	duplicates_mode = 0
 	i_am_server = true
 	debug_mode = true
 
@@ -39,6 +41,7 @@ func main() {
 	globalWaitGroup := new(sync.WaitGroup)
 	globalWaitGroup.Add(1)
 	go listener()
+	go cleaner()
 
 	// Wait for waitgroup to finish
 	globalWaitGroup.Wait()

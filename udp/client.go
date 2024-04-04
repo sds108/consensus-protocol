@@ -14,7 +14,9 @@ func main() {
 
 	my_features = make([]uint16, 1)
 	my_features[0] = 1
-	loss_constant = 0
+	loss_constant = 0.1
+	defect_constant = 0.1
+	duplicates_mode = 0
 	debug_mode = false
 
 	Startup()

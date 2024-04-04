@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"sync"
 
 	"github.com/expr-lang/expr"
@@ -49,7 +50,8 @@ func (h_referendum *host_referendum) copyConversationsMap() {
 			}
 		}
 
-		if foundFeature {
+		if foundFeature && conversation_ref.online {
+			log.Printf("\nAdding Conversation ID: %d to Vote ID: %s.\n", conversation_ref.conversation_id, h_referendum.VoteID)
 			h_referendum.participants[key] = conversation_ref
 		}
 	}
@@ -149,7 +151,12 @@ func (manager *referendum_manager) handle_new_question_from_server(pckt *PcktVot
 	// Lock referendum
 	manager.c_referendums[pckt.VoteID].referendum_lock.Lock()
 	defer manager.c_referendums[pckt.VoteID].referendum_lock.Unlock()
+
+	log.Printf("\n\nReceived a request to vote on Vote ID: %s, Question: %s.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question)
+
 	manager.c_referendums[pckt.VoteID].result = manager.computeQuestion(pckt.Question)
+
+	fmt.Print("\n-----------------------------------------------------------------------------------\n") //83
 
 	// Send Response back to server (asker, conversation who asked)
 	if asker != nil {
@@ -184,18 +191,16 @@ func (manager *referendum_manager) computeQuestion(question string) uint16 {
 		}
 
 		// Flip the value by chance
-		// if rand.Intn(2) == 1 {
-		// 	if response == SAT {
-		// 		response = UNSAT
-		// 	} else if response == UNSAT {
-		// 		response = SAT
-		// 	}
-		// }
+		if defect_constant > rand.Float64() {
+			if response == SAT {
+				response = UNSAT
+			} else if response == UNSAT {
+				response = SAT
+			}
+		}
 	}
 
-	if debug_mode {
-		fmt.Println("Computed Response: ", response)
-	}
+	fmt.Println("Computed Response: ", response)
 
 	return response
 }
@@ -313,5 +318,7 @@ func (manager *referendum_manager) handle_result_from_server(pckt *PcktVoteRespo
 	} else {
 		log.Printf("\n\nConsensus agrees with us for Vote ID: %s, Question: %s.\nOur answer was %d, and the consensus answer was %d.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question, manager.c_referendums[pckt.VoteID].result, pckt.Response)
 	}
+
+	fmt.Print("-----------------------------------------------------------------------------------\n") //83
 
 }

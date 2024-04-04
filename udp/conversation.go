@@ -50,6 +50,8 @@ type conversation struct {
 	conversation_features []uint16
 
 	LastOnline time.Time
+	missedSYNs uint64
+	online     bool
 }
 
 // newConversation creates a new conversation instance
@@ -68,6 +70,8 @@ func newConversation(conversation_id uint32, conv_addr *net.UDPAddr) *conversati
 			nextPcktNum: 0,
 		},
 		LastOnline: time.Now(),
+		missedSYNs: 0,
+		online:     true,
 	}
 }
 
@@ -89,15 +93,31 @@ func (conv *conversation) looper() {
 		conv.incomingProcessor()
 		conv.sendWindowPackets()
 		conv.checkForRetransmissions()
+		conv.checkLastOnline()
 		time.Sleep(1000 * time.Millisecond)
+	}
+}
+
+func (conv *conversation) checkLastOnline() {
+	if time.Since(conv.LastOnline) > 5000*time.Millisecond {
+		conv.sendSYN()
+		conv.missedSYNs += 1
 	}
 }
 
 // ARQ_Receive handles incoming packets, checks for duplicates, and sends ACKs/NAKs, updates receivedPackets
 func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt Pckt) {
+	// Update Address
+	conv.updateConversationAddr(addr)
 
 	// Update last online
+	if conv.online == false {
+		log.Printf("\n\nSetting Conversation ID: %d to Online on reconnection.\n\n", conv.conversation_id)
+	}
+
+	conv.online = true
 	conv.LastOnline = time.Now()
+	conv.missedSYNs = 0
 
 	switch pckt.Header.Type {
 	case DATA:
@@ -217,6 +237,9 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 			if debug_mode {
 				log.Printf("Received an Unknown Packet Type\n")
 			}
+
+			// Send ACK for packet
+			conv.sendACK(pckt.Header.PacketNum, pckt.Header.SequenceNum)
 		}
 	}
 }
@@ -638,9 +661,8 @@ func (conv *conversation) moveWindow() {
 				if conv.sender.outgoing[i].AckReceived {
 					// Move window if this packet is ACKed
 					conv.sender.windowStart += 1
-
-					// Delete Acked Packet
-					delete(conv.sender.outgoing, i)
+					// // Delete Acked Packet
+					// delete(conv.sender.outgoing, i)
 				} else {
 					// Stop moving window
 					break
@@ -744,9 +766,7 @@ func (conv *conversation) incomingProcessor() {
 
 		case hello_back_s2c:
 			{
-				if debug_mode {
-					log.Printf("Got a hello back\n")
-				}
+				log.Printf("\n\nGot a hello back...\n\n")
 				hello_response, err := DeserializeHello(conv.receiver.incoming[minPcktNum].Body)
 				if err != nil {
 					if debug_mode {

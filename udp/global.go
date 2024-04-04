@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"sync"
+	"time"
 )
 
 // This file includes all of the global variables necessary for the function of the Node
@@ -64,6 +65,8 @@ var (
 	i_am_server          bool
 	debug_mode           bool
 	loss_constant        float64
+	duplicates_mode      uint64
+	defect_constant      float64
 	serverAddr           *net.UDPAddr
 	conn                 *net.UDPConn
 	conversation_id_self uint32 = 0
@@ -115,22 +118,40 @@ func sendUDP(addr *net.UDPAddr, pckt *Pckt) error {
 	// Insert Checksum into the checksum field of the packet_bytes
 	copy(pckt_bytes[4:8], checksum_bytes[:4])
 
-	// Send it off over UDP
-	if i_am_server {
-		if _, err := conn.WriteTo(pckt_bytes, addr); err != nil {
-			if debug_mode {
-				log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+	// Send it off over UDP, with chance of loss
+	if loss_constant <= rand.Float64() {
+		for i := uint64(0); i <= duplicates_mode; i++ {
+			if i_am_server {
+				if _, err := conn.WriteTo(pckt_bytes, addr); err != nil {
+					if debug_mode {
+						log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+					}
+					return err
+				}
+			} else {
+				if _, err := conn.Write(pckt_bytes); err != nil {
+					if debug_mode {
+						log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
+					}
+					return err
+				}
 			}
-			return err
-		}
-	} else {
-		if _, err := conn.Write(pckt_bytes); err != nil {
-			if debug_mode {
-				log.Printf("Error sending packet %d: %d", pckt.Header.PacketNum, pckt.Header.SequenceNum)
-			}
-			return err
 		}
 	}
 
 	return nil
+}
+
+// Clean Conversations Map for offline conversations
+func cleaner() {
+	for true {
+		time.Sleep(500 * time.Millisecond)
+
+		for _, conv := range conversations {
+			if time.Since(conv.LastOnline) > 5000*time.Millisecond && conv.missedSYNs > 5 && conv.online {
+				log.Printf("\n\nSetting Conversation ID: %d to Offline due to inactivity.\n\n", conv.conversation_id)
+				conv.online = false
+			}
+		}
+	}
 }
