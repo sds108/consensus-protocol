@@ -83,18 +83,17 @@ func (conv *conversation) updateConversationAddr(conv_addr *net.UDPAddr) {
 
 func (conv *conversation) startUp() {
 	go conv.looper()
-
-	conv.sendHello()
 }
 
 // startConversation starts all of the Routines associated with said conversation
 func (conv *conversation) looper() {
+	conv.sendHello()
 	for true {
 		conv.incomingProcessor()
 		conv.sendWindowPackets()
 		conv.checkForRetransmissions()
 		conv.checkLastOnline()
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -147,6 +146,7 @@ func (conv *conversation) ARQ_Receive(conn *net.UDPConn, addr *net.UDPAddr, pckt
 				if debug_mode {
 					log.Printf("Duplicate packet received: %d.\n", pckt.Header.PacketNum)
 				}
+				return
 			}
 
 			// Updates the highest sequence number if required

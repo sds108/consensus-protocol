@@ -58,6 +58,8 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 
 	// Check if Ping Request for Conversation ID Assignment
 	if packet.Header.Type == PING_REQ {
+		generatedConvIDs_lock.Lock()
+		defer generatedConvIDs_lock.Unlock()
 		pingPckt := Pckt{
 			Header: PcktHeader{
 				Magic:       MAGIC_CONST,
@@ -97,6 +99,9 @@ func handleIncomingPackets(conn *net.UDPConn, addr *net.UDPAddr, raw_packet []by
 		conversationRef = newConversation(packet.Header.ConvID, addr)
 		conversations[packet.Header.ConvID] = conversationRef
 		conversationRef.startUp()
+
+		// Print New Connection Credentials
+		log.Println("\nNew Conversation started with ID: ", packet.Header.ConvID, ", IP: ", addr.IP.String(), ", Port: ", addr.Port, "\n")
 	}
 	conversations_lock.Unlock()
 

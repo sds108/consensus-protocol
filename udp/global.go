@@ -62,20 +62,21 @@ const SERVER_PORT_CONST = "8080"
 
 // Global Objects
 var (
-	i_am_server          bool
-	debug_mode           bool
-	loss_constant        float64
-	duplicates_mode      uint64
-	defect_constant      float64
-	serverAddr           *net.UDPAddr
-	conn                 *net.UDPConn
-	conversation_id_self uint32 = 0
-	conversations_lock   sync.Mutex
-	conversations        map[uint32]*conversation = make(map[uint32]*conversation)
-	generatedConvIDs     map[uint32]bool          = make(map[uint32]bool)
-	globalWaitGroup      sync.WaitGroup
-	ref_manager          *referendum_manager = newReferendumManager()
-	my_features          []uint16
+	i_am_server           bool
+	debug_mode            bool
+	loss_constant         float64
+	duplicates_mode       uint64
+	defect_constant       float64
+	serverAddr            *net.UDPAddr
+	conn                  *net.UDPConn
+	conversation_id_self  uint32 = 0
+	conversations_lock    sync.Mutex
+	conversations         map[uint32]*conversation = make(map[uint32]*conversation)
+	generatedConvIDs_lock sync.Mutex
+	generatedConvIDs      map[uint32]bool = make(map[uint32]bool)
+	globalWaitGroup       sync.WaitGroup
+	ref_manager           *referendum_manager = newReferendumManager()
+	my_features           []uint16
 )
 
 func generateConversationID() uint32 {
@@ -145,10 +146,10 @@ func sendUDP(addr *net.UDPAddr, pckt *Pckt) error {
 // Clean Conversations Map for offline conversations
 func cleaner() {
 	for true {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 
 		for _, conv := range conversations {
-			if time.Since(conv.LastOnline) > 5000*time.Millisecond && conv.missedSYNs > 5 && conv.online {
+			if time.Since(conv.LastOnline) > 5000*time.Millisecond && conv.missedSYNs > 100 && conv.online {
 				log.Printf("\n\nSetting Conversation ID: %d to Offline due to inactivity.\n\n", conv.conversation_id)
 				conv.online = false
 			}

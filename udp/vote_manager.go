@@ -84,12 +84,16 @@ type client_referendum struct {
 	// At first, this is the client's own response,
 	// then is overwritten by the server broadcast if it was wrong
 	result uint16
+
+	// Received Final Result
+	complete bool
 }
 
 func (manager *referendum_manager) newClientReferendum(pckt *PcktVoteRequest) *client_referendum {
 	return &client_referendum{
 		VoteID:   pckt.VoteID,
 		Question: pckt.Question,
+		complete: false,
 	}
 }
 
@@ -143,6 +147,7 @@ func (manager *referendum_manager) handle_new_question_from_server(pckt *PcktVot
 		if debug_mode {
 			log.Printf("Duplicate Vote ID detected\n")
 		}
+		return
 	}
 
 	// Create a Referendum Object that this Node (server) is hosting
@@ -311,6 +316,11 @@ func (manager *referendum_manager) handle_result_from_server(pckt *PcktVoteRespo
 	manager.c_referendums[pckt.VoteID].referendum_lock.Lock()
 	defer manager.c_referendums[pckt.VoteID].referendum_lock.Unlock()
 
+	// Check if already complete
+	if manager.c_referendums[pckt.VoteID].complete {
+		return
+	}
+
 	// Overwrite if necessary
 	if manager.c_referendums[pckt.VoteID].result != pckt.Response {
 		log.Printf("\n\nConsensus voted against us for Vote ID: %s, Question: %s.\nOur answer was %d, and the consensus answer was %d, overwriting now.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question, manager.c_referendums[pckt.VoteID].result, pckt.Response)
@@ -318,6 +328,9 @@ func (manager *referendum_manager) handle_result_from_server(pckt *PcktVoteRespo
 	} else {
 		log.Printf("\n\nConsensus agrees with us for Vote ID: %s, Question: %s.\nOur answer was %d, and the consensus answer was %d.\n\n", pckt.VoteID, manager.c_referendums[pckt.VoteID].Question, manager.c_referendums[pckt.VoteID].result, pckt.Response)
 	}
+
+	// Mark as complete
+	manager.c_referendums[pckt.VoteID].complete = true
 
 	fmt.Print("-----------------------------------------------------------------------------------\n") //83
 

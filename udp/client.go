@@ -12,9 +12,11 @@ func main() {
 	// Rule I am client
 	i_am_server = false
 
-	my_features = make([]uint16, 1)
+	my_features = make([]uint16, 3)
 	my_features[0] = 1
-	loss_constant = 0.1
+	my_features[1] = 0
+	my_features[1] = 0
+	loss_constant = 0
 	defect_constant = 0.1
 	duplicates_mode = 0
 	debug_mode = false
