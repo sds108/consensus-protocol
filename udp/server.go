@@ -12,14 +12,17 @@ func main() {
 
 	// Generate a Conversation ID for self if necessary
 	conversation_id_self = generateConversationID()
-
-	my_features = make([]uint16, 1)
-	my_features[0] = 1
-	loss_constant = 0.2
-	defect_constant = 0
-	duplicates_mode = 0
 	i_am_server = true
-	debug_mode = true
+
+	my_features = make([]uint16, 3)
+	my_features[0] = 1 // Simple Math (boolean expression) Evaluation
+	my_features[1] = 0 // SMT (Z3) Evaluation (not included in this project, planned for the future)
+	my_features[2] = 0 // AI Image classification (not included in this project, planned for the future)
+
+	loss_constant = 0.4 // 40% chance of a packet getting lost
+	defect_constant = 0 // 0.0-1.0 (0-100%) chance of defecting to a vote
+	duplicates_mode = 0 // 0-255 duplicates
+	debug_mode = true   // debug mode prints everything
 
 	// Resolve UDP Address to listen at
 	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:"+SERVER_PORT_CONST)
