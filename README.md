@@ -12,6 +12,18 @@ While this a very simple use case of the system, computing and comparing simple 
 
 This is not to say this protocol is complete, it is missing multi-fragment packets (i.e. missing large file transfer), congestion control (However, this would be an easy fix if given more time to work on this project), E2EE, storing session data to files (For timed out nodes, for now inactive connections remain in memory indefinitely), P2P functionality (though this could be made possible with a simple addition of maybe 20 lines), and I'm sure a couple other things are missing as well.
 
+#### How to Run or Compile:
+---
+ - To compile (or run) this project, the latest install of the Golang framework is required (1.22.0 and up)
+    - Two commands need to be run to compile this project (one for the client executable, and one for the server executable)
+        - Server: `go build -o server server.go conversation.go listener.go packet.go pip.go vote_manager.go global.go`
+        - After which, to start a server node (that will automatically run on port 8080), one can use the command: `./server`
+        - Client: `go build -o client client.go conversation.go listener.go packet.go pip.go vote_manager.go global.go Brainloop.go`
+        - After which, to start a client node (that will automatically try to connect to a server on port 8080, once the user specifies the server IP address), one can use the command: `./client`
+    - To run this project without compiling it to an executable, one can run these two commands:
+        - Server: `go run server.go conversation.go listener.go packet.go pip.go vote_manager.go global.go` (that will automatically run on port 8080)
+        - Client: `go run client.go conversation.go listener.go packet.go pip.go vote_manager.go global.go Brainloop.go` (that will automatically try to connect to a server on port 8080, once the user specifies the server IP address)
+
 #### Updates:
 ---
  - Client-side CLI (Command Line Interface)
